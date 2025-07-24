@@ -12,6 +12,8 @@ import scienceplots
 import art
 import emoji
 
+import numpy as np
+
 import jax
 from jax import numpy as jnp
 from jax_cosmo.scipy.interpolate import InterpolatedUnivariateSpline
@@ -86,9 +88,8 @@ class MBDPI:
         )  # process (batch, horizon, node)
         self.u2node_vvmap = jax.jit(jax.vmap(self.u2node_vmap, in_axes=(0)))
 
-        self.noise_type = args.noise_type
+        self.noise_type = cli_args.noise_type if cli_args.noise_type is not None else args.noise_type
         # random perturbation trajectories
-        import numpy as np
         N = 100
         normal_noise = np.random.normal(size=(N * args.Nsample, args.Hnode + 1, self.nu))
         self.normal_noise = jnp.array(normal_noise)
@@ -98,6 +99,10 @@ class MBDPI:
             from scipy.signal import butter, filtfilt
             order = self.cli_args.lporder
             cutoff_freq = self.cli_args.lpfreq
+            if order is None:
+                order = 1
+            if cutoff_freq is None:
+                cutoff_freq = 2
             sampling_freq = 1.0 / self.node_dt
             lp_filter_b, lp_filter_a = butter(order, cutoff_freq, fs=sampling_freq,
                                             btype='low', analog=False)
@@ -109,6 +114,8 @@ class MBDPI:
         elif self.noise_type == "colored":
             import colorednoise
             noise_beta = self.cli_args.beta
+            if noise_beta is None:
+                noise_beta = 1.0
             self.noise = colorednoise.powerlaw_psd_gaussian(noise_beta,
                                                             size=normal_noise.shape) 
         ##for i in range(5):
@@ -237,6 +244,9 @@ def main():
     parser.add_argument(
         "--hnode", type=int, default=None, help="Number of nodes"
     )
+    parser.add_argument(
+        "--noise-type", type=str, default=None, help="Type of noise to use (lp, colored, or none)"
+    )
     args = parser.parse_args()
 
     if args.list_examples:
@@ -270,6 +280,10 @@ def main():
     reset_env = jax.jit(env.reset)
     step_env = jax.jit(env.step)
     mbdpi = MBDPI(args, dial_config, env)
+
+    noise_filter_display = mbdpi.noise_type if mbdpi.noise_type else "No"
+    yaml_file_name = args.example if args.example is not None else args.config
+    print(f"Running DIAL-MPC with {noise_filter_display} on {yaml_file_name}")
 
     rng, rng_reset = jax.random.split(rng)
     state_init = reset_env(rng_reset)
@@ -318,14 +332,14 @@ def main():
             pbar.set_postfix({"rew": f"{state.reward:.2e}", "freq": f"{freq:.2f}"})
 
     rew = jnp.array(rews).mean()
-    print(f"mean reward = {rew:.4e}")
+    print(f"mean reward {mbdpi.noise_type}= {rew:.4e}")
     freqs = jnp.array(freqs)
-    print(f"mean freq = {freqs.mean():.2f}")
-    print(f"median freq = {jnp.median(freqs):.2f}")
+    print(f"mean freq {mbdpi.noise_type} = {freqs.mean():.2f}")
+    print(f"median freq {mbdpi.noise_type} = {jnp.median(freqs):.2f}")
 
     us_arr = jnp.array(us)
     control_variation = jnp.sum(jnp.linalg.norm(jnp.diff(us_arr, axis=0), axis=1))
-    print(f"Control variation (total jerk) = {control_variation:.2e}")
+    print(f"Control variation {mbdpi.noise_type} = {control_variation:.2e}")
 
     # create result dir if not exist
     if not os.path.exists(dial_config.output_dir):

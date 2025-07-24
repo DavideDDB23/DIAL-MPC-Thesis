@@ -254,3 +254,7 @@ AMENT_IGNORE
 dial_mpc_ws/
 unitree_go2_*
 unitree_h1_*
+
+# ↓ Now make sure you still track everything in dial_mpc/examples
+!/dial_mpc/examples/
+!/dial_mpc/examples/*.yaml
