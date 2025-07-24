@@ -49,7 +49,8 @@ def softmax_update(weights, Y0s, sigma, mu_0t):
 
 
 class MBDPI:
-    def __init__(self, args: DialConfig, env):
+    def __init__(self, cli_args, args: DialConfig, env):
+        self.cli_args = cli_args
         self.args = args
         self.env = env
         self.nu = env.action_size
@@ -95,8 +96,8 @@ class MBDPI:
 
         if self.noise_type == "lp":
             from scipy.signal import butter, filtfilt
-            order = 1
-            cutoff_freq = 2.0
+            order = self.cli_args.lporder
+            cutoff_freq = self.cli_args.lpfreq
             sampling_freq = 1.0 / self.node_dt
             lp_filter_b, lp_filter_a = butter(order, cutoff_freq, fs=sampling_freq,
                                             btype='low', analog=False)
@@ -107,14 +108,12 @@ class MBDPI:
             self.noise = self.lp_noise
         elif self.noise_type == "colored":
             import colorednoise
-            noise_beta = 1.0
+            noise_beta = self.cli_args.beta
             self.noise = colorednoise.powerlaw_psd_gaussian(noise_beta,
                                                             size=normal_noise.shape) 
         ##for i in range(5):
         ##    plt.plot(lp_noise_normalized[0, i, :, 0])
         ##plt.show()
-
-
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def node2u(self, nodes):
@@ -136,7 +135,6 @@ class MBDPI:
         #    Y0s_rng, (self.args.Nsample, self.args.Hnode + 1, self.nu)
         #)
         eps_Y = jax.random.choice(Y0s_rng, self.noise, shape=(self.args.Nsample,), axis=0)
-        
         Y0s = eps_Y * noise_scale[None, :, None] + Ybar_i
         # we can't change the first control
         Y0s = Y0s.at[:, 0].set(Ybar_i[0, :])
@@ -221,6 +219,24 @@ def main():
         default=None,
         help="Custom environment to import dynamically",
     )
+    parser.add_argument(
+        "--port", type=int, default=5000, help="Port number for visualization"
+    )
+    parser.add_argument(
+        "--seed", type=int, default=0, help="Seed"
+    )
+    parser.add_argument(
+        "--lporder", type=int, default=None, help="Low pass filter order"
+    )
+    parser.add_argument(
+        "--lpfreq", type=float, default=None, help="Low pass frequency"
+    )
+    parser.add_argument(
+        "--beta", type=float, default=None, help="Colored noise parameter"
+    )
+    parser.add_argument(
+        "--hnode", type=int, default=None, help="Number of nodes"
+    )
     args = parser.parse_args()
 
     if args.list_examples:
@@ -239,7 +255,9 @@ def main():
         config_dict = yaml.safe_load(open(args.config))
 
     dial_config = load_dataclass_from_dict(DialConfig, config_dict)
-    rng = jax.random.PRNGKey(seed=dial_config.seed)
+    if args.hnode is not None:
+        dial_config.Hnode = args.hnode
+    rng = jax.random.PRNGKey(seed=args.seed if args.seed is not None else dial_config.seed)
 
     # find env config
     env_config_type = dial_envs.get_config(dial_config.env_name)
@@ -251,13 +269,13 @@ def main():
     env = brax_envs.get_environment(dial_config.env_name, config=env_config)
     reset_env = jax.jit(env.reset)
     step_env = jax.jit(env.step)
-    mbdpi = MBDPI(dial_config, env)
+    mbdpi = MBDPI(args, dial_config, env)
 
     rng, rng_reset = jax.random.split(rng)
     state_init = reset_env(rng_reset)
 
     YN = jnp.ones([dial_config.Hnode + 1, mbdpi.nu]) * env.default_action
-    
+
     rng_exp, rng = jax.random.split(rng)
     # Y0 = mbdpi.reverse(state_init, YN, rng_exp)
     Y0 = YN
@@ -269,6 +287,7 @@ def main():
     state = state_init
     us = []
     infos = []
+    freqs = []
     with tqdm(range(Nstep), desc="Rollout") as pbar:
         for t in pbar:
             # forward single step
@@ -295,10 +314,11 @@ def main():
             rews_plan.append(info["rews"][-1].mean())
             infos.append(info)
             freq = 1 / (time.time() - t0)
+            freqs.append(freq)
             pbar.set_postfix({"rew": f"{state.reward:.2e}", "freq": f"{freq:.2f}"})
 
     rew = jnp.array(rews).mean()
-    print(f"mean reward = {rew:.2e}")
+    print(f"mean reward = {rew:.4e}")
     freqs = jnp.array(freqs)
     print(f"mean freq = {freqs.mean():.2f}")
     print(f"median freq = {jnp.median(freqs):.2f}")
@@ -359,7 +379,7 @@ def main():
     def index():
         return webpage
 
-    app.run(port=5000)
+    app.run(port=args.port if args.port is not None else 5000)
 
 
 if __name__ == "__main__":
