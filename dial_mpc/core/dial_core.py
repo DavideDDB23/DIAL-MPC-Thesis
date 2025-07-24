@@ -299,6 +299,9 @@ def main():
 
     rew = jnp.array(rews).mean()
     print(f"mean reward = {rew:.2e}")
+    freqs = jnp.array(freqs)
+    print(f"mean freq = {freqs.mean():.2f}")
+    print(f"median freq = {jnp.median(freqs):.2f}")
 
     us_arr = jnp.array(us)
     control_variation = jnp.sum(jnp.linalg.norm(jnp.diff(us_arr, axis=0), axis=1))
