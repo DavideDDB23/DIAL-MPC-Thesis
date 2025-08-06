@@ -1,4 +1,4 @@
-# DIAL-MPC: Hessian-based (per dial_core_derfree.py)
+# DIAL-MPC: Hessian-based
 seed: 0
 output_dir: unitree_go2_trot_hessian_test
 n_steps: 400
@@ -13,13 +13,11 @@ temp_sample: 0.05
 horizon_diffuse_factor: 0.9
 traj_diffuse_factor: 0.5
 
-# Parametri dell'ambiente (invariati)
 dt: 0.02
 timestep: 0.02
 leg_control: torque
 action_scale: 1.0
 
-# Parametri Go2 (invariati)
 default_vx: 0.8
 default_vy: 0.0
 default_vyaw: 0.0

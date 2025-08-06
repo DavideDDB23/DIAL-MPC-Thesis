@@ -22,3 +22,5 @@ class DialConfig:
     horizon_diffuse_factor: float = 0.9
     traj_diffuse_factor: float = 0.5  # factor to scale the sigma of trajectory diffuse
     update_method: str = "mppi"  # update method
+    cubic_sigma: float = 0.1  # cubic regularization for newton step
+    step_size_alpha: float = 0.5 # step size for the newton update
