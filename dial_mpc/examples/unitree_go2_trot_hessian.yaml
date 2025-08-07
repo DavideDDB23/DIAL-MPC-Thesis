@@ -4,7 +4,7 @@ output_dir: unitree_go2_trot_hessian_test
 n_steps: 400
 
 env_name: unitree_go2_walk
-Nsample: 512  # Numero di campioni drasticamente ridotto
+Nsample: 1024  # Numero di campioni drasticamente ridotto
 Hsample: 16
 Hnode: 4
 Ndiffuse: 2

@@ -132,6 +132,89 @@ def cubic_newton_direction(g, H, sigma, tol: float = 1e-6, maxiter: int = 20):
     return -jnp.nan_to_num(p_star)  # Return -p★ and sanitize output
 
 
+# -----------------------------------------------------------------------------
+# FastCubic sub-solver (Carmon & Duchi, 2020)
+# -----------------------------------------------------------------------------
+
+def _power_iteration(A: jnp.ndarray, num_iters: int = 10):
+    """Estimate the spectral norm of **dense** matrix ``A`` using power iteration.
+
+    The routine runs for a *small* fixed number of iterations (default 10),
+    which is enough for the moderate dimensionalities ( ≤ 256) typically
+    encountered in DIAL-MPC.  It is entirely JAX-compatible and differentiable.
+    """
+    v = jnp.ones((A.shape[1],), dtype=A.dtype)
+    v = v / jnp.linalg.norm(v)
+
+    def body_fn(v_carry, _):
+        v_next = A @ v_carry
+        v_next = v_next / (jnp.linalg.norm(v_next) + 1e-8)
+        return v_next, None
+
+    # Unroll with lax.scan for JIT compatibility
+    v_final, _ = jax.lax.scan(body_fn, v, None, length=num_iters)
+    return jnp.dot(v_final, A @ v_final)
+
+
+def fast_cubic_direction(
+    g: jnp.ndarray,
+    H: jnp.ndarray,
+    sigma: float,
+    tol: float = 1e-8,
+    maxiter: int = 200,
+):
+    """FastCubic (Nesterov-accelerated) solver for the cubic-regularised Newton step.
+
+    This implementation uses Nesterov's Accelerated Gradient (NAG) method,
+    inspired by the analysis in *Gradient Descent Finds the
+    Cubic-Regularized Newton Step* (Carmon & Duchi, 2020). NAG typically
+    exhibits faster convergence than standard gradient descent, which can
+    lead to better solutions in fewer iterations.
+    """
+    # Sanitize inputs
+    g = jnp.nan_to_num(g)
+    H = 0.5 * (jnp.nan_to_num(H) + jnp.transpose(H))  # ensure symmetry
+
+    # Step-size selection
+    lambda_max = _power_iteration(H, num_iters=8)
+
+    # Initialise at the origin
+    p0 = jnp.zeros_like(g)
+
+    def grad_fn(p):
+        p_norm = jnp.linalg.norm(p) + 1e-8
+        return g + H @ p + (sigma / 2.0) * p_norm * p
+
+    def body(state):
+        i, p, y = state
+        grad = grad_fn(y)
+
+        # Adaptive step-size based on the search point 'y'
+        y_norm = jnp.linalg.norm(y) + 1e-8
+        L = lambda_max + sigma * y_norm
+        eta = 1.0 / (L + 1e-8)
+
+        p_next = y - eta * grad
+
+        # Nesterov momentum update
+        momentum = i / (i + 3.0)
+        y_next = p_next + momentum * (p_next - p)
+
+        return (i + 1, p_next, y_next)
+
+    def cond(state):
+        i, p, y = state
+        # Check convergence on the main sequence 'p'
+        grad_norm = jnp.linalg.norm(grad_fn(p))
+        return (grad_norm > tol) & (i < maxiter)
+
+    # Initialise state for (iteration, p, y)
+    init_state = (0, p0, p0)
+    _, p_star, _ = jax.lax.while_loop(cond, body, init_state)
+
+    return -jnp.nan_to_num(p_star)
+
+
 def rollout_us(step_env, state, us):
     def step(state, u):
         state = step_env(state, u)
@@ -172,8 +255,8 @@ class MBDPI:
         self.step_nodes = jnp.linspace(0, self.ctrl_dt * args.Hsample, args.Hnode + 1)
         self.node_dt = self.ctrl_dt * (args.Hsample) / (args.Hnode)
 
-        # cubic Newton step solver
-        self.cubic_newton_direction = jax.jit(cubic_newton_direction)
+        # FastCubic Newton step solver (Carmon & Duchi, 2020)
+        self.cubic_newton_direction = jax.jit(fast_cubic_direction)
 
         # setup function
         self.rollout_us = jax.jit(functools.partial(rollout_us, self.env.step))
@@ -210,12 +293,22 @@ class MBDPI:
         '''
         # jax.debug.print("Ybar_i:{}, noise_scale:{}", Ybar_i.shape, noise_scale.shape, ordered=True)
         # sample from q_i
+        # ------------------------------------------------------------------
+        # Variance-reduced antithetic sampling
+        # ------------------------------------------------------------------
         rng, Y0s_rng = jax.random.split(rng)
-        eps_Y = jax.random.normal(
-            Y0s_rng, (self.args.Nsample, self.args.Hnode + 1, self.nu)
+
+        # Draw ⌈N/2⌉ i.i.d. samples and mirror them to form antithetic pairs.
+        half_N = (self.args.Nsample + 1) // 2
+        eps_half = jax.random.normal(
+            Y0s_rng, (half_N, self.args.Hnode + 1, self.nu)
         )
-        
-        Y0s = eps_Y * noise_scale[None, :, None] 
+        eps_Y = jnp.concatenate([eps_half, -eps_half], axis=0)[: self.args.Nsample]
+
+        # Mean-center the noise so the ensemble sums to zero.
+        eps_Y = eps_Y - jnp.mean(eps_Y, axis=0, keepdims=True)
+
+        Y0s = eps_Y * noise_scale[None, :, None]
    
         Y_ctrls = Y0s + Ybar_i
         Y_ctrls = jnp.clip(Y_ctrls, -1.0, 1.0)
