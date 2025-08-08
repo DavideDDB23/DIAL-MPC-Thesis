@@ -6,7 +6,7 @@ n_steps: 400
 noise_type: ""
 
 env_name: unitree_go2_walk
-Nsample: 2048
+Nsample: 512
 Hsample: 16
 Hnode: 4
 Ndiffuse: 2

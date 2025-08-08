@@ -88,39 +88,55 @@ class MBDPI:
         )  # process (batch, horizon, node)
         self.u2node_vvmap = jax.jit(jax.vmap(self.u2node_vmap, in_axes=(0)))
 
-        self.noise_type = cli_args.noise_type if cli_args.noise_type is not None else args.noise_type
-        # random perturbation trajectories
-        N = 100
-        normal_noise = np.random.normal(size=(N * args.Nsample, args.Hnode + 1, self.nu))
-        self.normal_noise = jnp.array(normal_noise)
-        self.noise = self.normal_noise
+        # VIGAS or DIAL specific initialization
+        self.optimizer = cli_args.optimizer
+        if self.optimizer == "vigas":
+            # --- VIGAS (Variational Inference Guided Annealing Search) Initialization ---
+            # VIGAS replaces isotropic sampling with an adaptive low-rank Gaussian distribution.
+            # This allows the optimizer to learn the shape of the reward landscape online.
+            # The variational distribution is q(Y) = N(mu, L @ L.T + diag(d)).
+            self.k = cli_args.vigas_rank  # Rank of the covariance matrix
+            D = (args.Hnode + 1) * self.nu  # Dimension of the flattened trajectory
 
-        if self.noise_type == "lp":
-            from scipy.signal import butter, filtfilt
-            order = self.cli_args.lporder
-            cutoff_freq = self.cli_args.lpfreq
-            if order is None:
-                order = 1
-            if cutoff_freq is None:
-                cutoff_freq = 2
-            sampling_freq = 1.0 / self.node_dt
-            lp_filter_b, lp_filter_a = butter(order, cutoff_freq, fs=sampling_freq,
-                                            btype='low', analog=False)
-            lp_noise = filtfilt(lp_filter_b, lp_filter_a, normal_noise, axis=-2, padlen=np.min([6, normal_noise.shape[-2] - 1]))
-            scale = lp_noise.std(0)[None]
-            lp_noise_normalized = lp_noise / scale
-            self.lp_noise = jnp.array(lp_noise_normalized)
-            self.noise = self.lp_noise
-        elif self.noise_type == "colored":
-            import colorednoise
-            noise_beta = self.cli_args.beta
-            if noise_beta is None:
-                noise_beta = 1.0
-            self.noise = colorednoise.powerlaw_psd_gaussian(noise_beta,
-                                                            size=normal_noise.shape) 
-        ##for i in range(5):
-        ##    plt.plot(lp_noise_normalized[0, i, :, 0])
-        ##plt.show()
+            # Initialize mean trajectory (mu)
+            mu_init = jnp.ones([args.Hnode + 1, self.nu]) * env.default_action
+            # Initialize low-rank covariance factor (L)
+            L_init = jnp.zeros((D, self.k))
+            # Initialize diagonal covariance factor (d)
+            d_init = jnp.ones(D) * cli_args.vigas_init_var
+            self.q_params_init = (mu_init, L_init, d_init)
+        else:
+            # --- DIAL-MPC Initialization ---
+            self.noise_type = cli_args.noise_type if cli_args.noise_type is not None else args.noise_type
+            # random perturbation trajectories
+            N = 100
+            normal_noise = np.random.normal(size=(N * args.Nsample, args.Hnode + 1, self.nu))
+            self.normal_noise = jnp.array(normal_noise)
+            self.noise = self.normal_noise
+
+            if self.noise_type == "lp":
+                from scipy.signal import butter, filtfilt
+                order = self.cli_args.lporder
+                cutoff_freq = self.cli_args.lpfreq
+                if order is None:
+                    order = 1
+                if cutoff_freq is None:
+                    cutoff_freq = 2
+                sampling_freq = 1.0 / self.node_dt
+                lp_filter_b, lp_filter_a = butter(order, cutoff_freq, fs=sampling_freq,
+                                                btype='low', analog=False)
+                lp_noise = filtfilt(lp_filter_b, lp_filter_a, normal_noise, axis=-2, padlen=np.min([6, normal_noise.shape[-2] - 1]))
+                scale = lp_noise.std(0)[None]
+                lp_noise_normalized = lp_noise / scale
+                self.lp_noise = jnp.array(lp_noise_normalized)
+                self.noise = self.lp_noise
+            elif self.noise_type == "colored":
+                import colorednoise
+                noise_beta = self.cli_args.beta
+                if noise_beta is None:
+                    noise_beta = 1.0
+                self.noise = colorednoise.powerlaw_psd_gaussian(noise_beta,
+                                                                size=normal_noise.shape)
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def node2u(self, nodes):
@@ -133,6 +149,79 @@ class MBDPI:
         spline = InterpolatedUnivariateSpline(self.step_us, us, k=2)
         nodes = spline(self.step_nodes)
         return nodes
+
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def vigas_update_fn(self, state, rng, q_params, temp):
+        # This function performs one step of VIGAS.
+        # It samples from the current variational distribution, evaluates the samples,
+        # and then updates the distribution's parameters using a natural gradient step.
+        mu, L, d = q_params
+        rng_k, rng_d, rng_update = jax.random.split(rng, 3)
+        D = (self.args.Hnode + 1) * self.nu
+
+        # 1. Sample from q(Y; mu, L, d) = N(mu, L @ L.T + diag(d))
+        # This creates structured, correlated noise that adapts to the problem.
+        mu_flat = mu.flatten()
+        eps_k = jax.random.normal(rng_k, (self.args.Nsample, self.k))
+        eps_d = jax.random.normal(rng_d, (self.args.Nsample, D))
+        # Low-rank sampling: Y = mu + L*eps_k + diag(sqrt(d))*eps_d
+        Y_samples_flat = mu_flat[None, :] + eps_k @ L.T + eps_d * jnp.sqrt(d)[None, :]
+        Y0s = Y_samples_flat.reshape(self.args.Nsample, self.args.Hnode + 1, self.nu)
+
+        # As in DIAL, fix the first control of all samples to be that of the current mean.
+        # This grounds the optimization at the current state, enforcing MPC principles.
+        Y0s = Y0s.at[:, 0, :].set(mu[0, :])
+        Y0s = jnp.clip(Y0s, -1.0, 1.0)
+
+        # 2. Evaluate samples
+        us = self.node2u_vvmap(Y0s)
+        rewss, pipeline_statess = self.rollout_us_vmap(state, us)
+        rews = rewss.mean(axis=-1)
+
+        # 3. Update Variational Parameters via Natural Gradient
+        # This step maximizes the Evidence Lower Bound (ELBO) by fitting the distribution
+        # to the high-reward samples. The weights are from the softmax of rewards,
+        # which makes this a natural gradient update.
+        weights = jax.nn.softmax(rews / temp)
+
+        # Update Mean: a weighted average of the samples.
+        mu_new = jnp.einsum("n,nij->ij", weights, Y0s)
+        mu_new_flat = mu_new.flatten()
+
+        # Update Covariance (L and d)
+        # Center samples around the *new* mean to compute the sample covariance.
+        centered_Y_flat = Y_samples_flat - mu_new_flat[None, :]
+
+        # Get top-k eigenvectors of the weighted sample covariance matrix.
+        # This is done efficiently via SVD of the sqrt-weighted centered samples matrix.
+        weighted_centered_Y = centered_Y_flat * jnp.sqrt(weights)[:, None]
+        _, S, Vt = jnp.linalg.svd(weighted_centered_Y, full_matrices=False)
+
+        # The new low-rank factor L is the scaled principal components.
+        L_new = Vt[:self.k, :].T * S[:self.k][None, :]
+
+        # The new diagonal factor d is the residual variance.
+        # It's the weighted sample variance minus variance explained by the low-rank part.
+        total_sample_variance = jnp.einsum('n,ni->i', weights, centered_Y_flat**2)
+        variance_from_L = jnp.sum(L_new**2, axis=1)
+        d_new = jnp.maximum(total_sample_variance - variance_from_L, 1e-6)
+
+        q_params_new = (mu_new, L_new, d_new)
+
+        # Also return info for logging, similar to reverse_once
+        qbar = jnp.einsum("n,nij->ij", weights, pipeline_statess.q)
+        qdbar = jnp.einsum("n,nij->ij", weights, pipeline_statess.qd)
+        xbar = jnp.einsum("n,nijk->ijk", weights, pipeline_statess.x.pos)
+
+        info = {
+            "rews": rews,
+            "qbar": qbar,
+            "qdbar": qdbar,
+            "xbar": xbar,
+            "new_noise_scale": d_new.mean(), # For compatibility with info structure if needed
+        }
+        return rng_update, q_params_new, info
+
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def reverse_once(self, state, rng, Ybar_i, noise_scale):
@@ -200,6 +289,31 @@ class MBDPI:
         Y = self.u2node_vmap(u)
         return Y
 
+    @functools.partial(jax.jit, static_argnums=(0,))
+    def shift_q_params(self, q_params):
+        # This function shifts the variational parameters for the receding horizon.
+        mu, L, d = q_params
+        # Shift mean trajectory using the existing spline-based shift
+        mu_shifted = self.shift(mu)
+
+        # Shift covariance factors. This is done by reshaping to trajectory shape,
+        # rolling along the time axis, and flattening back.
+        D_traj_shape = (self.args.Hnode + 1, self.nu)
+
+        # Shift L (low-rank factor)
+        L_reshaped = L.reshape(D_traj_shape + (self.k,))
+        L_shifted_reshaped = jnp.roll(L_reshaped, -1, axis=0)
+        L_shifted_reshaped = L_shifted_reshaped.at[-1, :, :].set(jnp.zeros((self.nu, self.k)))
+        L_shifted = L_shifted_reshaped.reshape((-1, self.k))
+
+        # Shift d (diagonal factor) and re-initialize the variance for the new last step.
+        d_reshaped = d.reshape(D_traj_shape)
+        d_shifted_reshaped = jnp.roll(d_reshaped, -1, axis=0)
+        d_shifted_reshaped = d_shifted_reshaped.at[-1, :].set(jnp.ones(self.nu) * self.cli_args.vigas_init_var)
+        d_shifted = d_shifted_reshaped.flatten()
+
+        return (mu_shifted, L_shifted, d_shifted)
+
     def shift_Y_from_u(self, u, n_step):
         u = jnp.roll(u, -n_step, axis=0)
         u = u.at[-n_step:].set(jnp.zeros_like(u[-n_step:]))
@@ -213,6 +327,11 @@ def main():
         rng, Y0, state = rng_Y0_state
         rng, Y0, info = mbdpi.reverse_once(state, rng, Y0, factor)
         return (rng, Y0, state), info
+
+    def vigas_scan(rng_q_params_state, temp):
+        rng, q_params, state = rng_q_params_state
+        rng, q_params, info = mbdpi.vigas_update_fn(state, rng, q_params, temp)
+        return (rng, q_params, state), info
 
     art.tprint("LeCAR @ CMU\nDIAL-MPC", font="big", chr_ignore=True)
     parser = argparse.ArgumentParser()
@@ -245,7 +364,20 @@ def main():
         "--hnode", type=int, default=None, help="Number of nodes"
     )
     parser.add_argument(
-        "--noise-type", type=str, default=None, help="Type of noise to use (lp, colored, or none)"
+        "--noise-type", type=str, default=None, help="Type of noise to use for DIAL (lp, colored, or none)"
+    )
+    # --- Arguments for VIGAS Optimizer ---
+    parser.add_argument(
+        "--optimizer", type=str, default="dial", help="Optimizer to use: 'dial' or 'vigas'"
+    )
+    parser.add_argument(
+        "--vigas_rank", type=int, default=10, help="[VIGAS] Rank of the covariance matrix"
+    )
+    parser.add_argument(
+        "--vigas_init_var", type=float, default=0.1, help="[VIGAS] Initial variance for the diagonal covariance"
+    )
+    parser.add_argument(
+        "--vigas_temp", type=float, default=0.01, help="[VIGAS] Temperature for softmax weighting"
     )
     args = parser.parse_args()
 
@@ -281,18 +413,19 @@ def main():
     step_env = jax.jit(env.step)
     mbdpi = MBDPI(args, dial_config, env)
 
-    noise_filter_display = mbdpi.noise_type if mbdpi.noise_type else "No"
+    optimizer_display = "VIGAS" if args.optimizer == "vigas" else f"DIAL-MPC with {mbdpi.noise_type} noise"
     yaml_file_name = args.example if args.example is not None else args.config
-    print(f"Running DIAL-MPC with {noise_filter_display} on {yaml_file_name}")
+    print(f"Running with {optimizer_display} on {yaml_file_name}")
 
     rng, rng_reset = jax.random.split(rng)
     state_init = reset_env(rng_reset)
 
-    YN = jnp.ones([dial_config.Hnode + 1, mbdpi.nu]) * env.default_action
-
-    rng_exp, rng = jax.random.split(rng)
-    # Y0 = mbdpi.reverse(state_init, YN, rng_exp)
-    Y0 = YN
+    # Initialize optimizer state
+    if args.optimizer == 'vigas':
+        q_params = mbdpi.q_params_init
+        Y0 = q_params[0] # For initial step and logging
+    else:
+        Y0 = jnp.ones([dial_config.Hnode + 1, mbdpi.nu]) * env.default_action
 
     Nstep = dial_config.n_steps
     rews = []
@@ -305,26 +438,44 @@ def main():
     with tqdm(range(Nstep), desc="Rollout") as pbar:
         for t in pbar:
             # forward single step
-            state = step_env(state, Y0[0])
-            rollout.append(state.pipeline_state)
-            rews.append(state.reward)
-            us.append(Y0[0])
+            if args.optimizer == 'vigas':
+                state = step_env(state, q_params[0][0]) # Use first action from mean trajectory
+                rollout.append(state.pipeline_state)
+                rews.append(state.reward)
+                us.append(q_params[0][0])
+                # Receding horizon shift for variational parameters
+                q_params = mbdpi.shift_q_params(q_params)
+            else:
+                state = step_env(state, Y0[0])
+                rollout.append(state.pipeline_state)
+                rews.append(state.reward)
+                us.append(Y0[0])
+                # Receding horizon shift for DIAL-MPC
+                Y0 = mbdpi.shift(Y0)
 
-            # update Y0
-            Y0 = mbdpi.shift(Y0)
 
             n_diffuse = dial_config.Ndiffuse
             if t == 0:
                 n_diffuse = dial_config.Ndiffuse_init
-                print("Performing JIT on DIAL-MPC")
+                print(f"Performing JIT on {optimizer_display}")
 
             t0 = time.time()
-            traj_diffuse_factors = (
-                mbdpi.sigma_control * dial_config.traj_diffuse_factor ** (jnp.arange(n_diffuse))[:, None]
-            )
-            (rng, Y0, _), info = jax.lax.scan(
-                reverse_scan, (rng, Y0, state), traj_diffuse_factors
-            )
+            if args.optimizer == 'vigas':
+                # For VIGAS, we use a constant temperature for the annealing process.
+                # The annealing happens implicitly as the covariance matrix sharpens.
+                temps = jnp.ones(n_diffuse) * args.vigas_temp
+                (rng, q_params, _), info = jax.lax.scan(
+                    vigas_scan, (rng, q_params, state), temps
+                )
+            else:
+                # DIAL-MPC annealing schedule
+                traj_diffuse_factors = (
+                    mbdpi.sigma_control * dial_config.traj_diffuse_factor ** (jnp.arange(n_diffuse))[:, None]
+                )
+                (rng, Y0, _), info = jax.lax.scan(
+                    reverse_scan, (rng, Y0, state), traj_diffuse_factors
+                )
+
             rews_plan.append(info["rews"][-1].mean())
             infos.append(info)
             freq = 1 / (time.time() - t0)
@@ -332,14 +483,14 @@ def main():
             pbar.set_postfix({"rew": f"{state.reward:.2e}", "freq": f"{freq:.2f}"})
 
     rew = jnp.array(rews).mean()
-    print(f"mean reward {mbdpi.noise_type}= {rew:.4e}")
+    print(f"mean reward {optimizer_display}= {rew:.4e}")
     freqs = jnp.array(freqs)
-    print(f"mean freq {mbdpi.noise_type} = {freqs.mean():.2f}")
-    print(f"median freq {mbdpi.noise_type} = {jnp.median(freqs):.2f}")
+    print(f"mean freq {optimizer_display} = {freqs.mean():.2f}")
+    print(f"median freq {optimizer_display} = {jnp.median(freqs):.2f}")
 
     us_arr = jnp.array(us)
     control_variation = jnp.sum(jnp.linalg.norm(jnp.diff(us_arr, axis=0), axis=1))
-    print(f"Control variation {mbdpi.noise_type} = {control_variation:.2e}")
+    print(f"Control variation {optimizer_display} = {control_variation:.2e}")
 
     # create result dir if not exist
     if not os.path.exists(dial_config.output_dir):
