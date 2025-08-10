@@ -86,7 +86,7 @@ class MBDPI:
         self.node2u_vvmap = jax.jit(
             jax.vmap(self.node2u_vmap, in_axes=(0))
         )  # process (batch, horizon, node)
-        self.u2node_vvmap = jax.jit(jax.vmap(self.u2node_vmap, in_axes=(0)))
+        self.u2node_vvmap = jax.jit(jax.vmap(self.node2u_vmap, in_axes=(0)))
 
         # VIGAS or DIAL specific initialization
         self.optimizer = cli_args.optimizer
