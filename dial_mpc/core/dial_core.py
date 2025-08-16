@@ -182,15 +182,22 @@ class MBDPI:
         # This step maximizes the Evidence Lower Bound (ELBO) by fitting the distribution
         # to the high-reward samples. The weights are from the softmax of rewards,
         # which makes this a natural gradient update.
-        weights = jax.nn.softmax(rews / temp)
+        scores = jax.lax.cond(
+            self.cli_args.vigas_standardize,
+            lambda r: (r - jnp.mean(r)) / (jnp.std(r) + 1e-6),
+            lambda r: r,
+            rews,
+        )
+        weights = jax.nn.softmax(scores / temp)
+
 
         # Update Mean: a weighted average of the samples.
-        mu_new = jnp.einsum("n,nij->ij", weights, Y0s)
-        mu_new_flat = mu_new.flatten()
+        mu_new_raw = jnp.einsum("n,nij->ij", weights, Y0s)
+        mu_new_flat_raw = mu_new_raw.flatten()
 
         # Update Covariance (L and d)
         # Center samples around the *new* mean to compute the sample covariance.
-        centered_Y_flat = Y_samples_flat - mu_new_flat[None, :]
+        centered_Y_flat = Y_samples_flat - mu_new_flat_raw[None, :]
 
         # Get top-k eigenvectors of the weighted sample covariance matrix.
         # This is done efficiently via SVD of the sqrt-weighted centered samples matrix.
@@ -198,13 +205,18 @@ class MBDPI:
         _, S, Vt = jnp.linalg.svd(weighted_centered_Y, full_matrices=False)
 
         # The new low-rank factor L is the scaled principal components.
-        L_new = Vt[:self.k, :].T * S[:self.k][None, :]
+        L_new_raw = Vt[:self.k, :].T * S[:self.k][None, :]
 
         # The new diagonal factor d is the residual variance.
         # It's the weighted sample variance minus variance explained by the low-rank part.
         total_sample_variance = jnp.einsum('n,ni->i', weights, centered_Y_flat**2)
-        variance_from_L = jnp.sum(L_new**2, axis=1)
-        d_new = jnp.maximum(total_sample_variance - variance_from_L, 1e-6)
+        variance_from_L = jnp.sum(L_new_raw**2, axis=1)
+        d_new_raw = jnp.maximum(total_sample_variance - variance_from_L, self.cli_args.vigas_cov_floor)
+
+        # Apply EMA-based trust region to stabilize updates
+        mu_new = (1 - self.cli_args.vigas_mu_alpha) * mu + self.cli_args.vigas_mu_alpha * mu_new_raw
+        L_new = (1 - self.cli_args.vigas_cov_alpha) * L + self.cli_args.vigas_cov_alpha * L_new_raw
+        d_new = (1 - self.cli_args.vigas_cov_alpha) * d + self.cli_args.vigas_cov_alpha * d_new_raw
 
         q_params_new = (mu_new, L_new, d_new)
 
@@ -378,6 +390,18 @@ def main():
     )
     parser.add_argument(
         "--vigas_temp", type=float, default=0.01, help="[VIGAS] Temperature for softmax weighting"
+    )
+    parser.add_argument(
+        "--vigas_standardize", action="store_true", help="[VGAS] Standardize rewards before softmax"
+    )
+    parser.add_argument(
+        "--vigas_mu_alpha", type=float, default=1.0, help="[VIGAS] EMA factor for mean update (trust region)"
+    )
+    parser.add_argument(
+        "--vigas_cov_alpha", type=float, default=1.0, help="[VIGAS] EMA factor for covariance update (trust region)"
+    )
+    parser.add_argument(
+        "--vigas_cov_floor", type=float, default=1e-6, help="[VIGAS] Floor for diagonal covariance"
     )
     args = parser.parse_args()
 
