@@ -6,7 +6,7 @@ n_steps: 400
 noise_type: ""
 
 env_name: unitree_go2_walk
-Nsample: 512
+Nsample: 2048 # 512 for VIGAS
 Hsample: 16
 Hnode: 4
 Ndiffuse: 2

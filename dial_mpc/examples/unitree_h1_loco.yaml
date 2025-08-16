@@ -4,7 +4,7 @@ output_dir: unitree_h1_loco
 n_steps: 400
 
 env_name: unitree_h1_loco
-Nsample: 2048
+Nsample: 2048 # 512 for VIGAS
 Hsample: 20
 Hnode: 5
 Ndiffuse: 1

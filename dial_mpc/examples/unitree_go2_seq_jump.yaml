@@ -4,7 +4,7 @@ output_dir: unitree_go2_seq_jump
 n_steps: 400
 
 env_name: unitree_go2_seq_jump
-Nsample: 2048
+Nsample: 2048 # 896 for VIGAS
 Hsample: 20
 Hnode: 5
 Ndiffuse: 2

@@ -4,7 +4,7 @@ output_dir: unitree_h1_push_crate
 n_steps: 300
 
 env_name: unitree_h1_push_crate
-Nsample: 2048
+Nsample: 2048 # 896 for VIGAS
 Hsample: 24
 Hnode: 6
 Ndiffuse: 4
