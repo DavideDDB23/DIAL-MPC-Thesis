@@ -114,6 +114,7 @@ class MBDPI:
             self.normal_noise = jnp.array(normal_noise)
             self.noise = self.normal_noise
 
+            # low pass filter
             if self.noise_type == "lp":
                 from scipy.signal import butter, filtfilt
                 order = self.cli_args.lporder
@@ -130,6 +131,7 @@ class MBDPI:
                 lp_noise_normalized = lp_noise / scale
                 self.lp_noise = jnp.array(lp_noise_normalized)
                 self.noise = self.lp_noise
+            # colored filter
             elif self.noise_type == "colored":
                 import colorednoise
                 noise_beta = self.cli_args.beta
@@ -196,7 +198,7 @@ class MBDPI:
         mu_new_flat_raw = mu_new_raw.flatten()
 
         # Update Covariance (L and d)
-        # Center samples around the *new* mean to compute the sample covariance.
+        # Center samples around the new mean to compute the sample covariance.
         centered_Y_flat = Y_samples_flat - mu_new_flat_raw[None, :]
 
         # Get top-k eigenvectors of the weighted sample covariance matrix.
@@ -230,7 +232,7 @@ class MBDPI:
             "qbar": qbar,
             "qdbar": qdbar,
             "xbar": xbar,
-            "new_noise_scale": d_new.mean(), # For compatibility with info structure if needed
+            "new_noise_scale": d_new.mean(), # For compatibility with info structure
         }
         return rng_update, q_params_new, info
 
@@ -373,15 +375,13 @@ def main():
         "--beta", type=float, default=None, help="Colored noise parameter"
     )
     parser.add_argument(
-        "--hnode", type=int, default=None, help="Number of nodes"
-    )
-    parser.add_argument(
         "--noise-type", type=str, default=None, help="Type of noise to use for DIAL (lp, colored, or none)"
     )
-    # --- Arguments for VIGAS Optimizer ---
     parser.add_argument(
         "--optimizer", type=str, default="dial", help="Optimizer to use: 'dial' or 'vigas'"
     )
+    
+    # --- Arguments for VIGAS Optimizer ---
     parser.add_argument(
         "--vigas_rank", type=int, default=10, help="[VIGAS] Rank of the covariance matrix"
     )
@@ -392,7 +392,7 @@ def main():
         "--vigas_temp", type=float, default=0.01, help="[VIGAS] Temperature for softmax weighting"
     )
     parser.add_argument(
-        "--vigas_standardize", action="store_true", help="[VGAS] Standardize rewards before softmax"
+        "--vigas_standardize", action="store_true", help="[VIGAS] Standardize rewards before softmax"
     )
     parser.add_argument(
         "--vigas_mu_alpha", type=float, default=1.0, help="[VIGAS] EMA factor for mean update (trust region)"
@@ -421,8 +421,6 @@ def main():
         config_dict = yaml.safe_load(open(args.config))
 
     dial_config = load_dataclass_from_dict(DialConfig, config_dict)
-    if args.hnode is not None:
-        dial_config.Hnode = args.hnode
     rng = jax.random.PRNGKey(seed=args.seed if args.seed is not None else dial_config.seed)
 
     # find env config
@@ -461,20 +459,22 @@ def main():
     freqs = []
     with tqdm(range(Nstep), desc="Rollout") as pbar:
         for t in pbar:
-            # forward single step
+            # forward single step (MPC): execute only the first control, then shift the horizon
             if args.optimizer == 'vigas':
-                state = step_env(state, q_params[0][0]) # Use first action from mean trajectory
+                # VIGAS: use the first action from the mean of the variational distribution q (mu[0])
+                state = step_env(state, q_params[0][0])
                 rollout.append(state.pipeline_state)
                 rews.append(state.reward)
                 us.append(q_params[0][0])
-                # Receding horizon shift for variational parameters
+                # Shift variational parameters (mu, L, d) to maintain receding-horizon consistency
                 q_params = mbdpi.shift_q_params(q_params)
             else:
+                # DIAL-MPC: use the first action from the current nominal denoised plan Y0
                 state = step_env(state, Y0[0])
                 rollout.append(state.pipeline_state)
                 rews.append(state.reward)
                 us.append(Y0[0])
-                # Receding horizon shift for DIAL-MPC
+                # Shift nominal trajectory forward (spline-consistent shift)
                 Y0 = mbdpi.shift(Y0)
 
 
@@ -485,14 +485,17 @@ def main():
 
             t0 = time.time()
             if args.optimizer == 'vigas':
-                # For VIGAS, we use a constant temperature for the annealing process.
-                # The annealing happens implicitly as the covariance matrix sharpens.
+                # For VIGAS, we use a constant temperature across inner updates.
+                # Exploration anneals implicitly as the learned covariance (L, d) sharpens
+                # via the reward-weighted SVD fit (plus optional EMA trust region).
                 temps = jnp.ones(n_diffuse) * args.vigas_temp
                 (rng, q_params, _), info = jax.lax.scan(
                     vigas_scan, (rng, q_params, state), temps
                 )
             else:
-                # DIAL-MPC annealing schedule
+                # DIAL-MPC uses an explicit diffusion/denoising schedule:
+                # per-step noise scales decay with traj_diffuse_factor and horizon shaping
+                # (sigma_control), then reverse diffusion refines the nominal plan.
                 traj_diffuse_factors = (
                     mbdpi.sigma_control * dial_config.traj_diffuse_factor ** (jnp.arange(n_diffuse))[:, None]
                 )
