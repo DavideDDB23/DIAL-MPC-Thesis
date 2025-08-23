@@ -49,13 +49,165 @@ def softmax_update(weights, Y0s, sigma, mu_0t):
     mu_0tm1 = jnp.einsum("n,nij->ij", weights, Y0s)
     return mu_0tm1, sigma
 
+# JAX Butterworth biquad utilities (2nd-order)
+
+def _butterworth_biquad_coeffs(fs: float, fc: float):
+    ff = fc / fs
+    ita = 1.0 / jnp.tan(jnp.pi * ff)
+    q = jnp.sqrt(2.0)
+    b0 = 1.0 / (1.0 + q * ita + ita ** 2)
+    b1 = 2.0 * b0
+    b2 = b0
+    a1 = 2.0 * (ita ** 2 - 1.0) * b0
+    a2 = -(1.0 - q * ita + ita ** 2) * b0
+    b = jnp.array([b0, b1, b2])
+    a = jnp.array([1.0, a1, a2])
+    return b, a
+
+@jax.jit
+def _lfilter_df2t_biquad_2d(x2d: jax.Array, b: jax.Array, a: jax.Array):
+    b0, b1, b2 = b
+    _, a1, a2 = a
+
+    def step(carry, x_t):
+        z1, z2 = carry
+        y_t = b0 * x_t + z1
+        z1_new = b1 * x_t + z2 - a1 * y_t
+        z2_new = b2 * x_t - a2 * y_t
+        return (z1_new, z2_new), y_t
+
+    T, C = x2d.shape
+    carry0 = (jnp.zeros((C,), x2d.dtype), jnp.zeros((C,), x2d.dtype))
+    (_, _), y2d = jax.lax.scan(step, carry0, x2d)
+    return y2d
+
+
+def _filtfilt_biquad(signal: jax.Array, b: jax.Array, a: jax.Array, axis: int):
+    x = jnp.moveaxis(signal, axis, 0)
+    T = x.shape[0]
+    batch_shape = x.shape[1:]
+    C = int(np.prod(batch_shape))
+    x2d = x.reshape(T, C)
+
+    padlen = int(min(3 * (b.shape[0] - 1), T - 1))
+    if padlen <= 0:
+        y2d = _lfilter_df2t_biquad_2d(x2d, b, a)
+        y = y2d.reshape((T,) + batch_shape)
+        return jnp.moveaxis(y, 0, axis)
+
+    left = 2 * x2d[0:1] - x2d[1 : padlen + 1][::-1]
+    right = 2 * x2d[-1:] - x2d[-padlen - 1 : -1][::-1]
+    xpad = jnp.concatenate([left, x2d, right], axis=0)
+
+    y_fwd = _lfilter_df2t_biquad_2d(xpad, b, a)
+    y_bwd = _lfilter_df2t_biquad_2d(y_fwd[::-1], b, a)[::-1]
+    y2d = y_bwd[padlen : padlen + T]
+    y = y2d.reshape((T,) + batch_shape)
+    return jnp.moveaxis(y, 0, axis)
+
+
+def second_order_butterworth(
+    signal: jax.Array,
+    f_sampling: float = 100.0,
+    f_cutoff: float = 15.0,
+    method: str = "forward_backward",
+    axis: int = -1,
+) -> jax.Array:
+    b, a = _butterworth_biquad_coeffs(f_sampling, f_cutoff)
+    b = b.astype(signal.dtype)
+    a = a.astype(signal.dtype)
+
+    if method == "forward_backward":
+        return _filtfilt_biquad(signal, b, a, axis=axis)
+    elif method == "forward":
+        x = jnp.moveaxis(signal, axis, 0)
+        T = x.shape[0]
+        batch_shape = x.shape[1:]
+        C = int(np.prod(batch_shape))
+        y2d = _lfilter_df2t_biquad_2d(x.reshape(T, C), b, a)
+        y = y2d.reshape((T,) + batch_shape)
+        return jnp.moveaxis(y, 0, axis)
+    elif method == "backward":
+        return jnp.flip(
+            second_order_butterworth(
+                jnp.flip(signal, axis=axis),
+                f_sampling,
+                f_cutoff,
+                method="forward",
+                axis=axis,
+            ),
+            axis=axis,
+        )
+    else:
+        raise ValueError("method must be 'forward', 'backward', or 'forward_backward'")
+
+
+def jax_colored_noise(key, beta: float, shape: tuple, axis: int = -1) -> jax.Array:
+    """
+    Generate colored noise with power spectrum ~ 1/f^beta using JAX.
+    Ensures zero DC (mean) and unit variance along the specified axis.
+    """
+    T = shape[axis]
+
+    # Frequencies for rFFT
+    freqs = jnp.fft.rfftfreq(T)
+
+    # Amplitude spectrum ~ 1/f^(beta/2), with zero DC
+    amp = jnp.where(freqs == 0.0, 0.0, freqs ** (-beta / 2.0))
+
+    # Generate white noise and FFT
+    white = jax.random.normal(key, shape)
+    white_fft = jnp.fft.rfft(white, axis=axis)
+
+    # Reshape amplitude for broadcasting across all non-time axes
+    amp_shape = [1] * len(shape)
+    amp_shape[axis] = white_fft.shape[axis]
+    amp = amp.reshape(amp_shape)
+
+    # Apply spectral shaping and invert
+    colored_fft = white_fft * amp
+    colored = jnp.fft.irfft(colored_fft, n=T, axis=axis)
+
+    # Remove any residual mean and normalize to unit variance along time axis
+    colored = colored - jnp.mean(colored, axis=axis, keepdims=True)
+    colored = colored / (jnp.std(colored, axis=axis, keepdims=True) + 1e-8)
+
+    return colored
+
+
+def jax_bandlimited_noise(key, fmax: float, dt: float, shape: tuple, axis: int = 1, num_harmonics: int = 8) -> jax.Array:
+    """
+    Generate band-limited noise by summing a small number of random Fourier modes up to fmax.
+    Expected shape is (batch, T, D) with time at axis=1 by default.
+    """
+    assert axis == 1, "jax_bandlimited_noise expects time axis at position 1"
+    batch, T, D = shape
+    two_pi = 2.0 * jnp.pi
+
+    key_f, key_phi, key_amp = jax.random.split(key, 3)
+    # Sample frequencies uniformly in (0, fmax]
+    freqs = jax.random.uniform(key_f, (batch, num_harmonics), minval=1e-3, maxval=fmax)
+    phases = two_pi * jax.random.uniform(key_phi, (batch, num_harmonics, 1, 1))
+    amps = jax.random.normal(key_amp, (batch, num_harmonics, 1, D)) / jnp.sqrt(num_harmonics)
+
+    t = (jnp.arange(T) * dt)[None, None, :, None]
+    omega_t = two_pi * freqs[:, :, None, None] * t
+    waves = jnp.cos(omega_t + phases)
+    series = jnp.sum(amps * waves, axis=1)  # (batch, T, D)
+
+    # Zero-mean and unit-variance along time axis for each (batch, D)
+    series = series - jnp.mean(series, axis=1, keepdims=True)
+    series = series / (jnp.std(series, axis=1, keepdims=True) + 1e-8)
+    return series
+
 
 class MBDPI:
-    def __init__(self, cli_args, args: DialConfig, env):
+    def __init__(self, cli_args, args: DialConfig, env, rng):
         self.cli_args = cli_args
         self.args = args
         self.env = env
         self.nu = env.action_size
+        self.rng = rng
 
         self.update_fn = {
             "mppi": softmax_update,
@@ -108,37 +260,58 @@ class MBDPI:
         else:
             # --- DIAL-MPC Initialization ---
             self.noise_type = cli_args.noise_type if cli_args.noise_type is not None else args.noise_type
-            # random perturbation trajectories
-            N = 100
-            normal_noise = np.random.normal(size=(N * args.Nsample, args.Hnode + 1, self.nu))
-            self.normal_noise = jnp.array(normal_noise)
-            self.noise = self.normal_noise
+            
+            noise_shape = (100 * self.args.Nsample, self.args.Hnode + 1, self.nu)
 
-            # low pass filter
-            if self.noise_type == "lp":
-                from scipy.signal import butter, filtfilt
-                order = self.cli_args.lporder
-                cutoff_freq = self.cli_args.lpfreq
-                if order is None:
-                    order = 1
-                if cutoff_freq is None:
-                    cutoff_freq = 2
-                sampling_freq = 1.0 / self.node_dt
-                lp_filter_b, lp_filter_a = butter(order, cutoff_freq, fs=sampling_freq,
-                                                btype='low', analog=False)
-                lp_noise = filtfilt(lp_filter_b, lp_filter_a, normal_noise, axis=-2, padlen=np.min([6, normal_noise.shape[-2] - 1]))
-                scale = lp_noise.std(0)[None]
-                lp_noise_normalized = lp_noise / scale
-                self.lp_noise = jnp.array(lp_noise_normalized)
-                self.noise = self.lp_noise
-            # colored filter
-            elif self.noise_type == "colored":
-                import colorednoise
+            if self.noise_type == "colored":
                 noise_beta = self.cli_args.beta
                 if noise_beta is None:
                     noise_beta = 1.0
-                self.noise = colorednoise.powerlaw_psd_gaussian(noise_beta,
-                                                                size=normal_noise.shape)
+                rng, noise_rng = jax.random.split(self.rng)
+                self.rng = rng
+                self.noise = jax_colored_noise(noise_rng, noise_beta, noise_shape, axis=1)
+                self.normal_noise = None 
+                self.lp_noise = None
+            elif self.noise_type == "bandlimited":
+                cutoff_freq = self.cli_args.lpfreq
+                if cutoff_freq is None:
+                    cutoff_freq = 2.0
+                rng, noise_rng = jax.random.split(self.rng)
+                self.rng = rng
+                self.noise = jax_bandlimited_noise(
+                    noise_rng,
+                    fmax=float(cutoff_freq),
+                    dt=float(self.node_dt),
+                    shape=noise_shape,
+                    axis=1,
+                    num_harmonics=8,
+                )
+                self.normal_noise = None
+                self.lp_noise = None
+            else:
+                rng, noise_rng = jax.random.split(self.rng)
+                self.rng = rng
+                normal_noise = jax.random.normal(noise_rng, noise_shape)
+                self.normal_noise = normal_noise
+                self.noise = self.normal_noise
+
+                # low pass filter
+                if self.noise_type == "lp":
+                    cutoff_freq = self.cli_args.lpfreq
+                    if cutoff_freq is None:
+                        cutoff_freq = 2.0
+                    sampling_freq = 1.0 / self.node_dt
+                    lp_noise = second_order_butterworth(
+                        self.normal_noise,
+                        f_sampling=float(sampling_freq),
+                        f_cutoff=float(cutoff_freq),
+                        method="forward_backward",
+                        axis=-2,
+                    )
+                    scale = lp_noise.std(axis=0, keepdims=True)
+                    lp_noise_normalized = lp_noise / (scale + 1e-8)
+                    self.lp_noise = lp_noise_normalized
+                    self.noise = self.lp_noise
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def node2u(self, nodes):
@@ -366,16 +539,13 @@ def main():
         "--seed", type=int, default=0, help="Seed"
     )
     parser.add_argument(
-        "--lporder", type=int, default=None, help="Low pass filter order"
-    )
-    parser.add_argument(
         "--lpfreq", type=float, default=None, help="Low pass frequency"
     )
     parser.add_argument(
         "--beta", type=float, default=None, help="Colored noise parameter"
     )
     parser.add_argument(
-        "--noise-type", type=str, default=None, help="Type of noise to use for DIAL (lp, colored, or none)"
+        "--noise-type", type=str, default=None, help="Type of noise to use for DIAL (lp, colored, bandlimited, or none)"
     )
     parser.add_argument(
         "--optimizer", type=str, default="dial", help="Optimizer to use: 'dial' or 'vigas'"
@@ -433,7 +603,8 @@ def main():
     env = brax_envs.get_environment(dial_config.env_name, config=env_config)
     reset_env = jax.jit(env.reset)
     step_env = jax.jit(env.step)
-    mbdpi = MBDPI(args, dial_config, env)
+    rng, mbdpi_rng = jax.random.split(rng)
+    mbdpi = MBDPI(args, dial_config, env, mbdpi_rng)
 
     optimizer_display = "VIGAS" if args.optimizer == "vigas" else f"DIAL-MPC with {mbdpi.noise_type} noise"
     yaml_file_name = args.example if args.example is not None else args.config
