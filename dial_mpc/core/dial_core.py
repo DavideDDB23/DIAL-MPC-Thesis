@@ -20,7 +20,9 @@ from jax_cosmo.scipy.interpolate import InterpolatedUnivariateSpline
 import functools
 
 from brax.io import html
+from brax import math
 import brax.envs as brax_envs
+from dial_mpc.utils.function_utils import global_to_body_velocity
 
 import dial_mpc.envs as dial_envs
 from dial_mpc.utils.io_utils import get_example_path, load_dataclass_from_dict
@@ -612,6 +614,10 @@ def main():
 
     rng, rng_reset = jax.random.split(rng)
     state_init = reset_env(rng_reset)
+    # Use the environment torso index (as in the env) for body-frame velocity/yaw
+    torso_idx = getattr(env, "_torso_idx", 1) - 1
+    # Compute walk-tracking error only for the unitree_go2_trot example
+    compute_walk_tracking = (args.example == "unitree_go2_trot")
 
     # Initialize optimizer state
     if args.optimizer == 'vigas':
@@ -628,6 +634,7 @@ def main():
     us = []
     infos = []
     freqs = []
+    tracking_errors = []
     with tqdm(range(Nstep), desc="Rollout") as pbar:
         for t in pbar:
             # forward single step (MPC): execute only the first control, then shift the horizon
@@ -647,6 +654,26 @@ def main():
                 us.append(Y0[0])
                 # Shift nominal trajectory forward (spline-consistent shift)
                 Y0 = mbdpi.shift(Y0)
+
+            # compute per-step walk-tracking error (body-frame vx, vy, yaw-rate) only for unitree_go2_trot
+            if compute_walk_tracking:
+                x = state.pipeline_state.x
+                xd = state.pipeline_state.xd
+                yaw = math.quat_to_euler(x.rot[torso_idx])[2]
+                vb = global_to_body_velocity(
+                    xd.vel[torso_idx], x.rot[torso_idx]
+                )
+                ab = global_to_body_velocity(
+                    xd.ang[torso_idx] * jnp.pi / 180.0, x.rot[torso_idx]
+                )
+                vel_tar = state.info["vel_tar"]
+                ang_vel_tar = state.info["ang_vel_tar"]
+                err = jnp.sqrt(
+                    (vb[0] - vel_tar[0]) ** 2
+                    + (vb[1] - vel_tar[1]) ** 2
+                    + (ab[2] - ang_vel_tar[2]) ** 2
+                )
+                tracking_errors.append(err)
 
 
             n_diffuse = dial_config.Ndiffuse
@@ -689,6 +716,11 @@ def main():
     us_arr = jnp.array(us)
     control_variation = jnp.sum(jnp.linalg.norm(jnp.diff(us_arr, axis=0), axis=1))
     print(f"Control variation {optimizer_display} = {control_variation:.2e}")
+
+    if compute_walk_tracking and len(tracking_errors) > 0:
+        tracking_errors = jnp.array(tracking_errors)
+        walk_track_error = tracking_errors.mean()
+        print(f"Walk-Tracking tracking error (lower is better) = {walk_track_error:.3f}")
 
     # create result dir if not exist
     if not os.path.exists(dial_config.output_dir):
