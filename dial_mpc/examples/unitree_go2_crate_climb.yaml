@@ -19,3 +19,5 @@ dt: 0.02
 timestep: 0.02
 leg_control: torque
 action_scale: 1.0
+
+crate_height: 0.6

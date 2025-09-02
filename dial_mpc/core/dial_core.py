@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import scienceplots
 import art
 import emoji
+import mujoco
 
 import numpy as np
 
@@ -614,6 +615,27 @@ def main():
 
     rng, rng_reset = jax.random.split(rng)
     state_init = reset_env(rng_reset)
+    # Print crate height at start (for crate climb scenario)
+    if dial_config.env_name == "unitree_go2_crate_climb":
+        try:
+            model = env.sys.mj_model
+            data = mujoco.MjData(model)
+            # Ensure mocap body's pose is set from model before forward kinematics
+            body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY.value, "box_body")
+            mocap_id = model.body_mocapid[body_id]
+            if mocap_id != -1:
+                data.mocap_pos[mocap_id] = model.body_pos[body_id]
+                data.mocap_quat[mocap_id] = model.body_quat[body_id]
+            mujoco.mj_forward(model, data)
+            geom_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM.value, "static_box")
+            geom_center = data.geom_xpos[geom_id]
+            R = np.array(data.geom_xmat[geom_id]).reshape(3, 3)
+            half_sizes = np.array(model.geom_size[geom_id])
+            # Robust world Z top (handles rotations): center_z + sum(|R[2,:]| * half_sizes)
+            crate_top_z = float(geom_center[2] + float(np.sum(np.abs(R[2, :]) * half_sizes)))
+            print(f"Crate height (top above ground) = {crate_top_z:.3f} m")
+        except Exception as e:
+            print(f"Could not compute crate height: {e}")
     # Use the environment torso index (as in the env) for body-frame velocity/yaw
     torso_idx = getattr(env, "_torso_idx", 1) - 1
     # Compute walk-tracking error only for the unitree_go2_trot example
@@ -721,6 +743,60 @@ def main():
         tracking_errors = jnp.array(tracking_errors)
         walk_track_error = tracking_errors.mean()
         print(f"Walk-Tracking tracking error (lower is better) = {walk_track_error:.3f}")
+
+    # Evaluate success/failure for crate climb before visualization
+    if dial_config.env_name == "unitree_go2_crate_climb":
+        try:
+            model = env.sys.mj_model
+            data = mujoco.MjData(model)
+            # Sync mocap pose for the crate body before forward
+            body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY.value, "box_body")
+            mocap_id = model.body_mocapid[body_id]
+            if mocap_id != -1:
+                data.mocap_pos[mocap_id] = model.body_pos[body_id]
+                data.mocap_quat[mocap_id] = model.body_quat[body_id]
+            mujoco.mj_forward(model, data)
+            geom_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM.value, "static_box")
+            geom_center = data.geom_xpos[geom_id]
+            R = np.array(data.geom_xmat[geom_id]).reshape(3, 3)
+            half_sizes = np.array(model.geom_size[geom_id])
+
+            crate_center_xy = np.array(geom_center[:2])
+            crate_top_z = float(geom_center[2] + float(np.sum(np.abs(R[2, :]) * half_sizes)))
+            # Projected half-size in world XY for conservative bounds
+            half_sizes_xy = np.abs(R[:2, :]) @ half_sizes
+            half_size_xy = half_sizes_xy
+            margin = 0.1
+            x_min = float(crate_center_xy[0] - half_size_xy[0] + margin)
+            x_max = float(crate_center_xy[0] + half_size_xy[0] - margin)
+            y_min = float(crate_center_xy[1] - half_size_xy[1] + margin)
+            y_max = float(crate_center_xy[1] + half_size_xy[1] - margin)
+
+            # Use the last 1.0s window to assess stability on top of the crate
+            T_total = len(rollout)
+            window_len = max(1, min(T_total, int(0.1 / float(env.dt))))
+            start_idx = T_total - window_len
+            base_pos = jnp.stack([rollout[t].x.pos[torso_idx] for t in range(start_idx, T_total)], axis=0)
+            base_rot = jnp.stack([rollout[t].x.rot[torso_idx] for t in range(start_idx, T_total)], axis=0)
+            base_vel = jnp.stack([rollout[t].xd.vel[torso_idx] for t in range(start_idx, T_total)], axis=0)
+            rpy = jax.vmap(math.quat_to_euler)(base_rot)
+
+            z_ok = base_pos[:, 2] > (crate_top_z + 0.20)
+            xy_ok = (
+                (base_pos[:, 0] > x_min)
+                & (base_pos[:, 0] < x_max)
+                & (base_pos[:, 1] > y_min)
+                & (base_pos[:, 1] < y_max)
+            )
+            roll_ok = jnp.abs(rpy[:, 0]) < 0.35  # ~20 deg
+            pitch_ok = jnp.abs(rpy[:, 1]) < 0.35  # ~20 deg
+            speed_ok = jnp.linalg.norm(base_vel, axis=1) < 0.25
+            stable = z_ok & xy_ok & roll_ok & pitch_ok & speed_ok
+            success = bool(jnp.all(stable))
+            result_str = "SUCCESS" if success else "FAILURE"
+            print(f"{result_str}: crate height = {crate_top_z:.3f} m")
+        except Exception as e:
+            print(f"Could not evaluate crate success: {e}")
 
     # create result dir if not exist
     if not os.path.exists(dial_config.output_dir):

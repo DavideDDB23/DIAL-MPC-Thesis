@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import os
 from typing import Any, Dict, Sequence, Tuple, Union, List
 
 import numpy as np
@@ -646,8 +647,9 @@ class UnitreeGo2SeqJumpEnv(UnitreeGo2Env):
                 cnt += 1
 
 
+@dataclass
 class UnitreeGo2CrateEnvConfig(UnitreeGo2EnvConfig):
-    pass
+    crate_height: float = 0.6
 
 
 class UnitreeGo2CrateEnv(UnitreeGo2Env):
@@ -672,7 +674,27 @@ class UnitreeGo2CrateEnv(UnitreeGo2Env):
 
     def make_system(self, config: UnitreeGo2EnvConfig) -> System:
         model_path = get_model_path("unitree_go2", "mjx_scene_force_crate.xml")
-        sys = mjcf.load(model_path)
+        # Create a runtime XML with updated height to ensure both physics and visualization reflect it
+        try:
+            with open(model_path, "r") as f:
+                xml_str = f.read()
+            half_h = float(config.crate_height) * 0.5
+            # Replace body z position (box_body pos="1.3 0 0.3") -> set z to half_h
+            import re
+            xml_str = re.sub(r'(\<body\s+name="box_body"[^>]*pos="\s*1\.3\s+0\s+)([0-9eE\.+-]+)("[^>]*\>)',
+                             lambda m: m.group(1) + f"{half_h:.6f}" + m.group(3),
+                             xml_str)
+            # Replace geom half-size z (static_box size="0.31 0.46 0.3") -> set last to half_h
+            xml_str = re.sub(r'(\<geom\s+name="static_box"[^>]*size="\s*0\.31\s+0\.46\s+)([0-9eE\.+-]+)("[^>]*\>)',
+                             lambda m: m.group(1) + f"{half_h:.6f}" + m.group(3),
+                             xml_str)
+            runtime_xml = os.path.join(os.path.dirname(model_path), "mjx_scene_force_crate_runtime.xml")
+            with open(runtime_xml, "w") as f:
+                f.write(xml_str)
+            sys = mjcf.load(runtime_xml)
+        except Exception:
+            # Fallback to original if any issue
+            sys = mjcf.load(model_path)
         sys = sys.tree_replace({"opt.timestep": config.timestep})
         return sys
 
@@ -747,6 +769,8 @@ class UnitreeGo2CrateEnv(UnitreeGo2Env):
         penalty_contact = pipeline_state.contact.dist <= 0.001
         reward_1 = lambda x: 1.0 * x
         reward_0 = lambda x: 0.0
+        crate_height = float(self._config.crate_height)
+        z_tol = 0.01
         contact_indices = [16, 17, 18, 19]
         for i in range(4):
             # contact_idx = 26 + 4 + 2 + 2 * 2 * (i+1) + i
@@ -755,12 +779,12 @@ class UnitreeGo2CrateEnv(UnitreeGo2Env):
             contact_dist = pipeline_state.contact.dist[contact_idx]
             contact_pt = pipeline_state.contact.pos[contact_idx]
             cond = (
-                (contact_pt[0] > 1.0)
+                 (contact_pt[0] > 1.0)
                 & (contact_pt[0] < 1.6)
                 & (contact_pt[1] > -0.45)
                 & (contact_pt[1] < 0.45)
-                & (contact_pt[2] > 0.59)
-                & (contact_pt[2] < 0.61)
+                & (contact_pt[2] > crate_height - z_tol)
+                & (contact_pt[2] < crate_height + z_tol)
             )
             reward_contact += jax.lax.cond(cond, reward_1, reward_0, 1.0)
             penalty_contact = penalty_contact.at[i].set(penalty_contact[i] & (~cond))
@@ -796,7 +820,9 @@ class UnitreeGo2CrateEnv(UnitreeGo2Env):
 
     def reset(self, rng: jax.Array) -> State:
         state = super().reset(rng)
-        state.info["pos_tar"] = jnp.array([1.45, 0.0, 0.87])
+        # Target head height is crate top plus 0.27 m (since 0.87 = 0.60 + 0.27)
+        z_target = float(self._config.crate_height) + 0.27
+        state.info["pos_tar"] = jnp.array([1.45, 0.0, z_target])
         state.info["vel_tar"] = jnp.array([0.0, 0.0, 0.0])
         state.info["ang_vel_tar"] = jnp.array([0.0, 0.0, 0.0])
         state.info["yaw_tar"] = 0.0
