@@ -640,6 +640,8 @@ def main():
     torso_idx = getattr(env, "_torso_idx", 1) - 1
     # Compute walk-tracking error only for the unitree_go2_trot example
     compute_walk_tracking = (args.example == "unitree_go2_trot")
+    # Compute sequential jumping metric for unitree_go2_seq_jump tasks
+    compute_seq_jumping = (dial_config.env_name == "unitree_go2_seq_jump")
 
     # Initialize optimizer state
     if args.optimizer == 'vigas':
@@ -657,6 +659,7 @@ def main():
     infos = []
     freqs = []
     tracking_errors = []
+    seq_jumping_states = []
     with tqdm(range(Nstep), desc="Rollout") as pbar:
         for t in pbar:
             # forward single step (MPC): execute only the first control, then shift the horizon
@@ -696,6 +699,17 @@ def main():
                     + (ab[2] - ang_vel_tar[2]) ** 2
                 )
                 tracking_errors.append(err)
+
+            # Collect data for sequential jumping metric calculation
+            if compute_seq_jumping:
+                # Store full state info needed for contact reward calculation
+                seq_jumping_states.append({
+                    'pipeline_state': state.pipeline_state,
+                    'contact_stage': state.info["contact_stage"],
+                    'contact_targets': state.info["contact_targets"],
+                    'contact_target_radius': state.info["contact_target_radius"],
+                    'step': state.info["step"]
+                })
 
 
             n_diffuse = dial_config.Ndiffuse
@@ -743,6 +757,115 @@ def main():
         tracking_errors = jnp.array(tracking_errors)
         walk_track_error = tracking_errors.mean()
         print(f"Walk-Tracking tracking error (lower is better) = {walk_track_error:.3f}")
+
+    # Calculate sequential jumping metric if applicable  
+    if compute_seq_jumping and len(seq_jumping_states) > 0:
+        def calculate_contact_reward_paper_formula(state_data, wcorrect=0.1, wwrong=0.1):
+            """Calculate contact reward according to paper formula:
+            r(j)_con(t) = wcorrect * n(j)_correct(t) - wwrong * [n(j)_wrong(t) - n(j-1)_correct(t)]
+            Using correct foot position detection like the base environment.
+            """
+            pipeline_state = state_data['pipeline_state']
+            current_stage = int(state_data['contact_stage'])
+            contact_targets = state_data['contact_targets']
+            contact_target_radius = state_data['contact_target_radius']
+            
+            # Use the same contact detection as the existing UnitreeGo2SeqJumpEnv
+            n_correct_current = 0
+            n_wrong_current = 0
+            n_correct_previous = 0
+            
+            # Count contacts for current stage j
+            for foot_idx in range(4):
+                contact_dist = pipeline_state.contact.dist[foot_idx]
+                contact_pt = pipeline_state.contact.pos[foot_idx]
+                
+                # Check if foot is in contact
+                is_in_contact = contact_dist <= 0.001
+                
+                if is_in_contact:
+                    # Check if contact is within target radius for current stage j
+                    if current_stage < len(contact_targets):
+                        target_pos = contact_targets[current_stage, foot_idx, :2]  # x, y only
+                        dist_to_target_sq = jnp.sum((contact_pt[:2] - target_pos) ** 2)
+                        target_radius_sq = contact_target_radius[current_stage, foot_idx] ** 2
+                        
+                        if dist_to_target_sq <= target_radius_sq:
+                            n_correct_current += 1
+                        else:
+                            n_wrong_current += 1
+                    else:
+                        n_wrong_current += 1  # Current stage doesn't exist
+                        
+                    # Check if contact would be correct for previous stage (j-1)
+                    if current_stage > 0:
+                        prev_target_pos = contact_targets[current_stage - 1, foot_idx, :2]
+                        dist_to_prev_target_sq = jnp.sum((contact_pt[:2] - prev_target_pos) ** 2)
+                        prev_target_radius_sq = contact_target_radius[current_stage - 1, foot_idx] ** 2
+                        
+                        if dist_to_prev_target_sq <= prev_target_radius_sq:
+                            n_correct_previous += 1
+            
+            # Apply paper's formula: r(j)_con(t) = wcorrect * n(j)_correct(t) - wwrong * [n(j)_wrong(t) - n(j-1)_correct(t)]
+            contact_reward = wcorrect * n_correct_current - wwrong * (n_wrong_current - n_correct_previous)
+            return contact_reward
+        
+        # Calculate contact rewards for all timesteps
+        contact_rewards = []
+        for state_data in seq_jumping_states:
+            reward = calculate_contact_reward_paper_formula(state_data)
+            contact_rewards.append(reward)
+        
+        contact_rewards = jnp.array(contact_rewards)
+        
+        # Calculate per-stage minimum rewards according to paper
+        # Only consider the stable contact period of each stage, not the jumping phase
+        jump_dt = env._config.jump_dt if hasattr(env._config, 'jump_dt') else 0.8
+        dt = env.dt
+        timesteps_per_stage = int(jump_dt / dt)  # 0.8 / 0.02 = 40 timesteps per stage
+        
+        # Consider only the last portion of each stage when robot should be stable on target
+        stable_window = int(0.3 / dt)  # 0.3 / 0.02 = 15 timesteps
+        
+        stage_min_rewards = []
+        num_stages = 10 
+        
+        for stage in range(num_stages):
+            stage_start = stage * timesteps_per_stage
+            stage_end = min((stage + 1) * timesteps_per_stage, len(contact_rewards))
+            
+            # Only consider the stable window at the end of each stage
+            stable_start = max(stage_start, stage_end - stable_window)
+            stable_end = stage_end
+            
+            if stable_start < len(contact_rewards) and stable_start < stable_end:
+                stable_rewards = contact_rewards[stable_start:stable_end]
+                if len(stable_rewards) > 0:
+                    stage_min_reward = float(jnp.min(stable_rewards))
+                    stage_min_rewards.append(stage_min_reward)
+                else:
+                    stage_min_rewards.append(0.0)
+            else:
+                stage_min_rewards.append(0.0)
+        
+        # Calculate total contact reward (sum of stage minimums)
+        total_contact_reward = sum(stage_min_rewards)
+        
+        # Normalize to [0,1] range as shown in paper
+        # Maximum possible reward per stage: wcorrect * 4 feet = 0.1 * 4 = 0.4
+        # Maximum possible total over 10 stages: 0.4 * 10 = 4.0  
+        # But we need to map the range [-4.0, 4.0] to [0, 1]
+        max_possible_per_stage = 0.1 * 4  # All feet correct
+        min_possible_per_stage = -0.1 * 4  # All feet wrong
+        max_possible_total = max_possible_per_stage * num_stages  # 4.0
+        min_possible_total = min_possible_per_stage * num_stages  # -4.0
+        
+        # Normalize from [-4.0, 4.0] to [0, 1]
+        normalized_total = (total_contact_reward - min_possible_total) / (max_possible_total - min_possible_total)
+        normalized_total = max(0.0, min(1.0, normalized_total))  # Clamp to [0,1]
+        
+        print(f"Sequential Jumping - Raw Total Contact Reward = {total_contact_reward:.3f}")
+        print(f"Sequential Jumping - Normalized Total Contact Reward [0,1] = {normalized_total:.3f}")
 
     # Evaluate success/failure for crate climb before visualization
     if dial_config.env_name == "unitree_go2_crate_climb":
