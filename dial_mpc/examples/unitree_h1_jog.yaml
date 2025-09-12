@@ -4,7 +4,7 @@ output_dir: unitree_h1_jog
 n_steps: 400
 
 env_name: unitree_h1_walk
-Nsample: 2048 # 896 for VIGAS
+Nsample: 896 # 896 for VIGAS
 Hsample: 25
 Hnode: 5
 Ndiffuse: 4

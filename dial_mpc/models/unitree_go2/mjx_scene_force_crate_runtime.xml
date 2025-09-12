@@ -21,8 +21,8 @@
     <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
     <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
 
-    <body name="box_body" mocap="true" pos="1.3 0 0.283500">
-      <geom name="static_box" type="box" size="0.31 0.46 0.283500" material="box_material" rgba="0.87 0.72 0.53 0.0"/>
+    <body name="box_body" mocap="true" pos="1.3 0 0.300000">
+      <geom name="static_box" type="box" size="0.31 0.46 0.300000" material="box_material" rgba="0.87 0.72 0.53 0.0"/>
     </body>
   </worldbody>
 </mujoco>

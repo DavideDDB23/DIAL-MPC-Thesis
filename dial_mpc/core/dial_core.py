@@ -29,8 +29,9 @@ import dial_mpc.envs as dial_envs
 from dial_mpc.utils.io_utils import get_example_path, load_dataclass_from_dict
 from dial_mpc.examples import examples
 from dial_mpc.core.dial_config import DialConfig
+import scienceplots
 
-plt.style.use("science")
+plt.style.use(['science', 'no-latex'])
 
 # Tell XLA to use Triton GEMM, this improves steps/sec by ~30% on some GPUs
 xla_flags = os.environ.get("XLA_FLAGS", "")
@@ -660,6 +661,11 @@ def main():
     freqs = []
     tracking_errors = []
     seq_jumping_states = []
+    vel_tars = []
+    ang_vel_tars = []
+    z_feet_tars = []
+    # Collect per-step convergence traces: best reward per inner iteration
+    convergence_traces = []  # list of 1D numpy arrays, length = n_diffuse for the step
     with tqdm(range(Nstep), desc="Rollout") as pbar:
         for t in pbar:
             # forward single step (MPC): execute only the first control, then shift the horizon
@@ -679,6 +685,15 @@ def main():
                 us.append(Y0[0])
                 # Shift nominal trajectory forward (spline-consistent shift)
                 Y0 = mbdpi.shift(Y0)
+
+            # record target commands for analysis
+            vel_tars.append(state.info["vel_tar"])
+            ang_vel_tars.append(state.info["ang_vel_tar"])
+            # record target feet heights if available
+            try:
+                z_feet_tars.append(state.info["z_feet_tar"])  # shape (4,)
+            except Exception:
+                pass
 
             # compute per-step walk-tracking error (body-frame vx, vy, yaw-rate) only for unitree_go2_trot
             if compute_walk_tracking:
@@ -738,6 +753,14 @@ def main():
                 )
 
             rews_plan.append(info["rews"][-1].mean())
+            # Convergence trace for this step: best reward per inner iteration, cumulative best
+            try:
+                # info["rews"] has shape (n_diffuse, Nsample[+1])
+                inner_best = jnp.max(info["rews"], axis=-1)  # (n_diffuse,)
+                inner_best_cum = jnp.maximum.accumulate(inner_best)
+                convergence_traces.append(np.asarray(inner_best_cum))
+            except Exception:
+                pass
             infos.append(info)
             freq = 1 / (time.time() - t0)
             freqs.append(freq)
@@ -968,6 +991,111 @@ def main():
     xdata = jnp.array(xdata)
     jnp.save(os.path.join(dial_config.output_dir, f"{timestamp}_states"), data)
     jnp.save(os.path.join(dial_config.output_dir, f"{timestamp}_predictions"), xdata)
+
+    # Save consolidated rollout metrics for analysis (e.g., behavioral trajectories)
+    try:
+        T_total = len(rollout)
+        time_arr = jnp.arange(T_total) * float(env.dt)
+        # Torso kinematics
+        base_pos = jnp.stack([rollout[t].x.pos[torso_idx] for t in range(T_total)], axis=0)
+        base_rot = jnp.stack([rollout[t].x.rot[torso_idx] for t in range(T_total)], axis=0)
+        base_vel_world = jnp.stack([rollout[t].xd.vel[torso_idx] for t in range(T_total)], axis=0)
+        rpy = jax.vmap(math.quat_to_euler)(base_rot)
+        yaw_arr = rpy[:, 2]
+        # Body-frame linear velocity (vx, vy, vz)
+        base_vel_body = jax.vmap(global_to_body_velocity)(base_vel_world, base_rot)
+        # Feet heights (z) for the 4 feet sites
+        feet_site_ids = getattr(env, "_feet_site_id", None)
+        feet_z = None
+        if feet_site_ids is not None:
+            feet_z = jnp.stack([rollout[t].site_xpos[feet_site_ids][:, 2] for t in range(T_total)], axis=0)
+        # Joint angles (exclude free joint)
+        joint_angles = jnp.stack([rollout[t].qpos[7:] for t in range(T_total)], axis=0)
+        # Controls executed (already collected during rollout)
+        us_arr = jnp.array(us)
+        # Targets recorded during rollout
+        vel_tar_series = jnp.array(vel_tars) if len(vel_tars) == T_total else jnp.zeros((T_total, 3))
+        ang_vel_tar_series = jnp.array(ang_vel_tars) if len(ang_vel_tars) == T_total else jnp.zeros((T_total, 3))
+
+        np.savez(
+            os.path.join(dial_config.output_dir, f"{timestamp}_rollout_metrics.npz"),
+            time=np.asarray(time_arr),
+            base_pos=np.asarray(base_pos),
+            base_vel_world=np.asarray(base_vel_world),
+            base_vel_body=np.asarray(base_vel_body),
+            yaw=np.asarray(yaw_arr),
+            feet_z=None if feet_z is None else np.asarray(feet_z),
+            feet_z_tar=np.asarray(jnp.array(z_feet_tars)) if len(z_feet_tars) == T_total else None,
+            joint_angles=np.asarray(joint_angles),
+            controls=np.asarray(us_arr),
+            vel_tar=np.asarray(vel_tar_series),
+            ang_vel_tar=np.asarray(ang_vel_tar_series),
+            algo=optimizer_display,
+            env_name=dial_config.env_name,
+        )
+        print(f"Saved rollout metrics to {os.path.join(dial_config.output_dir, f'{timestamp}_rollout_metrics.npz')}")
+    except Exception as e:
+        print(f"Could not save rollout metrics: {e}")
+
+    # Save learning curve data for sample efficiency analysis
+    try:
+        step_numbers = np.arange(len(rews))
+        step_rewards = np.array(rews)
+        samples_per_step = dial_config.Nsample
+        cumulative_samples = (step_numbers + 1) * samples_per_step
+        
+        # Compute running average reward for smoother curves
+        window_size = max(5, min(50, len(step_rewards) // 4))  # Adaptive window size with a floor
+        weights = np.ones(window_size, dtype=float)
+        running_sum = np.convolve(step_rewards, weights, mode='same')
+        normalizer = np.convolve(np.ones_like(step_rewards, dtype=float), weights, mode='same')
+        running_avg_rewards = running_sum / np.maximum(normalizer, 1e-8)
+        running_avg_samples = cumulative_samples
+        running_avg_steps = step_numbers
+        
+        np.savez(
+            os.path.join(dial_config.output_dir, f"{timestamp}_learning_curve.npz"),
+            step_numbers=step_numbers,
+            step_rewards=step_rewards,
+            cumulative_samples=cumulative_samples,
+            running_avg_rewards=running_avg_rewards,
+            running_avg_samples=running_avg_samples,
+            running_avg_steps=running_avg_steps,
+            final_reward=float(step_rewards[-10:].mean()),  # Average of last 10 steps
+            total_samples=int(cumulative_samples[-1]),
+            samples_per_step=samples_per_step,
+            algo=optimizer_display,
+            env_name=dial_config.env_name,
+        )
+        print(f"Saved learning curve data to {os.path.join(dial_config.output_dir, f'{timestamp}_learning_curve.npz')}")
+    except Exception as e:
+        print(f"Could not save learning curve data: {e}")
+
+    # Save convergence traces for per-step inner-iteration analysis
+    try:
+        if len(convergence_traces) > 0:
+            max_len = max(len(tr) for tr in convergence_traces)
+            traces_padded = np.full((len(convergence_traces), max_len), np.nan, dtype=float)
+            lengths = np.zeros((len(convergence_traces),), dtype=int)
+            for i, tr in enumerate(convergence_traces):
+                tr_np = np.asarray(tr, dtype=float)
+                L = tr_np.shape[0]
+                lengths[i] = L
+                traces_padded[i, :L] = tr_np
+            mean_trace = np.nanmean(traces_padded, axis=0)
+            iters = np.arange(1, max_len + 1)
+            np.savez(
+                os.path.join(dial_config.output_dir, f"{timestamp}_convergence_traces.npz"),
+                traces=traces_padded,
+                lengths=lengths,
+                mean_trace=mean_trace,
+                iters=iters,
+                algo=optimizer_display,
+                env_name=dial_config.env_name,
+            )
+            print(f"Saved convergence traces to {os.path.join(dial_config.output_dir, f'{timestamp}_convergence_traces.npz')}")
+    except Exception as e:
+        print(f"Could not save convergence traces: {e}")
 
     @app.route("/")
     def index():
