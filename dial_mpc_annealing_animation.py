@@ -295,4 +295,4 @@ if __name__ == "__main__":
     # Set random seed for reproducible trajectories
     np.random.seed(42)
     anim = create_animation()
-    
+ 
