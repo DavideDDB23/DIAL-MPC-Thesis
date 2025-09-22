@@ -213,7 +213,6 @@ def main():
             if t == 0:
                 n_diffuse = dial_config.Ndiffuse_init
                 print("Performing JIT on DIAL-MPC")
-                print("hello...")
 
             t0 = time.time()
             # Vanilla MPPI update without diffusion or reverse steps
@@ -289,5 +288,4 @@ def main():
 
 
 if __name__ == "__main__":
-    # python dial_mpc/core/mppi_core.py --example unitree_h1_jog
     main()
