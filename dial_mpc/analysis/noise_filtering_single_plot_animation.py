@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from scipy import signal
 
-# Set up the plot style matching thesis plots
 plt.rcParams.update({
     'font.family': 'DejaVu Sans',
     'font.size': 14,
@@ -14,7 +13,6 @@ plt.rcParams.update({
     'figure.facecolor': 'white'
 })
 
-# Consistent colorblind-friendly colors
 colors = {
     'white_noise': '#d62728',    # Red (chaotic, unstructured)
     'filtered': '#2ca02c',       # Green (smooth, structured)
@@ -49,9 +47,6 @@ def create_single_plot_noise_animation():
     # Create figure
     fig, ax = plt.subplots(figsize=(12, 7))
     
-    # Setup plot
-    # ax.set_title('Effect of Low-Pass Filtering on Exploration Noise', 
-    #              fontsize=18, fontweight='bold', pad=20)
     ax.set_ylim(-3.5, 3.5)
     ax.set_xlabel('Time (s)', fontweight='bold', fontsize=14)
     ax.set_ylabel('Noise Amplitude', fontweight='bold', fontsize=14)
@@ -111,15 +106,13 @@ def create_single_plot_noise_animation():
     plt.tight_layout()
     plt.subplots_adjust(top=0.90)
     
-    # Create and save animation - slower and smoother
+    # Create and save animation
     anim = animation.FuncAnimation(fig, animate, frames=201, interval=120, blit=True, repeat=True)
     
     try:
         print("Saving single-plot noise filtering animation...")
         anim.save('noise_filtering_single_plot.gif', writer='pillow', fps=12, dpi=120)
-        anim.save('noise_filtering_single_plot.mp4', writer='ffmpeg', fps=12, dpi=120,
-                  extra_args=['-vcodec', 'libx264'])
-        print("Files saved: noise_filtering_single_plot.gif, noise_filtering_single_plot.mp4")
+        print("Files saved: noise_filtering_single_plot.gif")
     except Exception as e:
         print(f"Error saving animation: {e}")
 

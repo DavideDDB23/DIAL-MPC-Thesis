@@ -1,17 +1,9 @@
-#!/usr/bin/env python3
-"""
-Animated visualization of VIGAS Implicit Annealing Behavior.
-Single plot showing sampling distribution evolution with variance inset.
-Designed for immediate understanding in presentations.
-"""
-
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.patches import Ellipse
 import scienceplots
 
-# Set up the plot style for consistency
 plt.rcParams.update({
     'font.family': 'DejaVu Sans',
     'font.size': 14,
@@ -22,7 +14,6 @@ plt.rcParams.update({
     'figure.facecolor': 'white'
 })
 
-# Colorblind-friendly Wong palette
 COLORS = {
     'orange': '#E69F00',
     'sky_blue': '#56B4E9',
@@ -69,10 +60,8 @@ def simulate_vigas_iteration(samples, rewards, temperature):
 def create_vigas_implicit_annealing_animation():
     """Create single-plot animation showing VIGAS implicit annealing."""
     
-    # Setup single plot
     fig, ax = plt.subplots(1, 1, figsize=(10, 8))
     
-    # Create reward landscape
     x = np.linspace(-3, 3, 100)
     y = np.linspace(-3, 3, 100)
     X, Y = np.meshgrid(x, y)
@@ -116,11 +105,11 @@ def create_vigas_implicit_annealing_animation():
         if frame < active_frames:
             progress = frame / (active_frames - 1)
         else:
-            progress = 1.0  # Stay at the final state during the pause
+            progress = 1.0 
             
         current_iter = min(int(progress * n_iterations), n_iterations)
         
-        # Show reward landscape (subtle)
+        # Show reward landscape
         ax.contourf(X, Y, Z, levels=20, alpha=0.15, cmap='viridis')
         
         # Show evolution of sampling distribution
@@ -174,7 +163,7 @@ def create_vigas_implicit_annealing_animation():
         ax.spines['right'].set_visible(False)
         
         # Create inset for variance plot
-        inset = fig.add_axes([0.15, 0.18, 0.32, 0.25])  # [left, bottom, width, height] in bottom-left corner
+        inset = fig.add_axes([0.15, 0.18, 0.32, 0.25])
         
         iters = np.arange(current_iter + 1)
         current_variances = variance_history[:current_iter + 1]
@@ -208,7 +197,7 @@ def create_vigas_implicit_annealing_animation():
         elif progress < 1.0: # Use progress to detect if we are still animating
             title = f"VIGAS Implicit Annealing: Learning (Iter {current_iter})"
             color = COLORS['orange']
-        else: # Paused at the end
+        else: 
             title = f"VIGAS Implicit Annealing: Converged (Iter {n_iterations})"
             color = COLORS['blue']
         
@@ -219,7 +208,7 @@ def create_vigas_implicit_annealing_animation():
                                   interval=1000/fps, repeat=True, blit=False)
     
     plt.tight_layout()
-    plt.subplots_adjust(left=0.1, bottom=0.12, top=0.93) # Increased top to reduce space
+    plt.subplots_adjust(left=0.1, bottom=0.12, top=0.93)
     
     # Save as GIF
     print("Generating clear VIGAS implicit annealing animation...")

@@ -2,14 +2,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scienceplots
 
-# Use science plots style for publication quality
 plt.style.use(['science', 'no-latex'])
 
-# Configure font to avoid missing glyphs with scienceplots and no-latex
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 
-# Data from the results tables (full data)
 data = {
     'Go2 Trot': [
         ('MPPI', -0.201, 2048),
@@ -46,7 +43,6 @@ data = {
     ]
 }
 
-# Colorblind-friendly colors (Wong palette)
 colors = {
     'VIGAS': '#0173B2',          # Blue
     'DIAL-MPC': '#E69F00',       # Orange  
@@ -83,10 +79,9 @@ for task_name in all_tasks:
         
         normalized_points.append((algorithm, improvement, samples, task_name))
 
-# Plot points for DIAL-MPC and VIGAS directly without jitter
 shown_labels_ax2 = set()
 for alg, improvement, samples, task_name in normalized_points:
-    if alg == 'MPPI': # Skip plotting MPPI points, keep only the baseline line
+    if alg == 'MPPI': # Skip plotting MPPI points
         continue 
     
     label = alg if alg not in shown_labels_ax2 else ""
@@ -116,6 +111,5 @@ ax2.legend(fontsize=11, bbox_to_anchor=(-0.1, 1.02), loc='upper right', frameon=
 
 plt.tight_layout()
 
-plt.savefig('all_tasks_comparison_plot.pdf', dpi=300, bbox_inches='tight')
 plt.savefig('all_tasks_comparison_plot.png', dpi=300, bbox_inches='tight')
 plt.show() 

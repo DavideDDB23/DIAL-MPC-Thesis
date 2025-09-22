@@ -4,7 +4,6 @@ import matplotlib.patches as patches
 from matplotlib.lines import Line2D
 import scienceplots
 
-# Configure matplotlib to avoid font issues
 plt.style.use(['science', 'no-latex'])
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
@@ -18,7 +17,6 @@ def parse_runtime(time_str):
         return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
     return 0
 
-# Runtime data from your tables (in mm:ss format)
 runtime_data = {
     'Go2 Trot': {
         'MPPI': '07:12',
@@ -61,7 +59,6 @@ runtime_data = {
     }
 }
 
-# Colorblind-friendly colors (Wong palette)
 colors = {
     'MPPI': '#56B4E9',          # Sky blue  
     'DIAL-MPC': '#E69F00',      # Orange
@@ -71,14 +68,12 @@ colors = {
     'VIGAS': '#0173B2'          # Blue
 }
 
-# Convert all runtimes to seconds
 runtime_seconds = {}
 for task, algorithms in runtime_data.items():
     runtime_seconds[task] = {}
     for alg, time_str in algorithms.items():
         runtime_seconds[task][alg] = parse_runtime(time_str)
 
-# Create the plot
 fig, axes = plt.subplots(2, 3, figsize=(15, 10))
 axes = axes.flatten()
 
@@ -109,7 +104,6 @@ for i, task in enumerate(tasks):
         dial_time = runtimes[dial_idx]
         speedup = dial_time / vigas_time
         
-        # Add speedup text
         ax.annotate(f'{speedup:.1f}× faster', 
                    xy=(vigas_idx, vigas_time), 
                    xytext=(vigas_idx, vigas_time + max(runtimes) * 0.15),
@@ -117,7 +111,6 @@ for i, task in enumerate(tasks):
                    fontsize=10, fontweight='bold',
                    arrowprops=dict(arrowstyle='->', color='red', lw=1.5))
     
-    # Format y-axis to show time in mm:ss
     def format_time(x, pos):
         minutes = int(x // 60)
         seconds = int(x % 60)
@@ -126,35 +119,24 @@ for i, task in enumerate(tasks):
     from matplotlib.ticker import FuncFormatter
     ax.yaxis.set_major_formatter(FuncFormatter(format_time))
     
-    # Set title and labels
     ax.set_title(task, fontsize=12, fontweight='bold')
     ax.set_ylabel('Wall-Clock Time (mm:ss)', fontsize=10)
     
-    # Rotate x-axis labels for readability
     ax.set_xticks(range(len(algorithms)))
     ax.set_xticklabels([alg.replace('DIAL-MPC + ', '') for alg in algorithms], 
                        rotation=45, ha='right', fontsize=9)
     
-    # Add grid for readability
     ax.grid(True, alpha=0.3, axis='y')
     ax.set_axisbelow(True)
 
-# Create overall title
-# fig.suptitle('Computational Efficiency: VIGAS Delivers 2-5× Runtime Speedup', 
-#              fontsize=16, fontweight='bold', y=0.95)
-
-# Create legend
 legend_elements = [Line2D([0], [0], color=colors[alg], lw=4, label=alg) 
                    for alg in colors.keys() if any(alg in task_data for task_data in runtime_data.values())]
 
 fig.legend(handles=legend_elements, loc='center', bbox_to_anchor=(0.5, 0.02), 
            ncol=6, fontsize=10, frameon=False)
 
-# Adjust layout
 plt.tight_layout()
 plt.subplots_adjust(bottom=0.12, top=0.95, hspace=0.4, wspace=0.3)
 
-# Save the plot
 plt.savefig('dial_mpc/analysis/runtime_efficiency.png', dpi=300, bbox_inches='tight')
-plt.savefig('dial_mpc/analysis/runtime_efficiency.pdf', bbox_inches='tight')
 plt.show() 

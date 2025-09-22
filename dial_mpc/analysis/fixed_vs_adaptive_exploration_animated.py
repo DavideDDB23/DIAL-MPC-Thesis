@@ -4,7 +4,6 @@ import matplotlib.animation as animation
 from matplotlib.collections import PolyCollection
 import matplotlib.patches as mpatches
 
-# Set up the plot style matching thesis plots
 plt.rcParams.update({
     'font.family': 'DejaVu Sans',
     'font.size': 14,
@@ -15,7 +14,6 @@ plt.rcParams.update({
     'figure.facecolor': 'white'
 })
 
-# Consistent colorblind-friendly colors
 colors = {
     'nominal': '#1f77b4',       # Blue (VIGAS/Nominal)
     'fixed': '#d62728',         # Red (Fixed/Wasted Exploration)
@@ -24,9 +22,7 @@ colors = {
     'refine': '#2ca02c',        # Green (Low variance)
 }
 
-def create_animated_exploration_comparison():
-    """Create a clearer, animated side-by-side comparison diagram."""
-    
+def create_animated_exploration_comparison():    
     fig, (ax_fixed, ax_adaptive) = plt.subplots(1, 2, figsize=(16, 7), sharey=True)
     
     time_steps = np.linspace(0, 10, 100)
@@ -68,11 +64,9 @@ def create_animated_exploration_comparison():
     ax_adaptive.plot(time_steps, nominal_traj, color=colors['nominal'], 
                      linewidth=4, label='Nominal Trajectory', zorder=10)
     
-    # Placeholders for animated elements
     poly_collection = PolyCollection([], facecolors='red', alpha=0.4)
     ax_adaptive.add_collection(poly_collection)
     
-    # Annotations - initially invisible
     explore_text = ax_adaptive.annotate('Global Search\n(High Variance)', 
                          xy=(1.5, nominal_traj[15] + 1.2), ha='center',
                          fontweight='bold', color=colors['explore'], fontsize=11, visible=False)
@@ -81,7 +75,6 @@ def create_animated_exploration_comparison():
                          xy=(8.5, nominal_traj[85] + 1.3), ha='center',
                          fontweight='bold', color=colors['refine'], fontsize=11, visible=False)
     
-    # Move Adaptive Learning arrow above the plot
     ax_adaptive.annotate('', xy=(7, 4.2), xytext=(3, 4.2),
                          arrowprops=dict(arrowstyle='simple,head_width=0.7,head_length=0.8', 
                                          lw=3, color='black'))
@@ -94,19 +87,15 @@ def create_animated_exploration_comparison():
     legend_patch = mpatches.Patch(color=colors['nominal'], alpha=0.2, label='Adaptive Variance (±1σ)')
     handles, labels = ax_adaptive.get_legend_handles_labels()
     handles.append(legend_patch)
-    # Move legend to be vertically centered on the right
     ax_adaptive.legend(handles=handles, loc='upper right', bbox_to_anchor=(1, 0.9375), framealpha=0.9)
 
     plt.tight_layout()
-    plt.subplots_adjust(top=0.92, hspace=0.4) # Added hspace and re-confirmed top
+    plt.subplots_adjust(top=0.92, hspace=0.4)
     
     def animate(frame):
-        # Total frames: 120 for animation + 30 for pause = 150 total
         if frame < 120:
-            # Animation phase: frame goes from 0 to 119
             progress = frame / 119.0
         else:
-            # Pause phase: stay at final state
             progress = 1.0
         
         # Animate the variance shrinking
@@ -152,17 +141,15 @@ def create_animated_exploration_comparison():
             
         poly_collection.set_facecolors(gradient_colors)
         
-        # Make annotations appear at the right time
         explore_text.set_visible(progress > 0.1)
         refine_text.set_visible(progress > 0.8)
         
         return [poly_collection, explore_text, refine_text]
 
-    # Create and save animation - slower with pause at end
     anim = animation.FuncAnimation(fig, animate, frames=150, interval=80, blit=True, repeat=True)
     
     try:
-        print("Saving SLOWER ANIMATED diagram with end pause...")
+        print("Saving diagram with end pause...")
         anim.save('fixed_vs_adaptive_exploration.gif', writer='pillow', fps=12, dpi=120)
         print("Saved: fixed_vs_adaptive_exploration.gif")
     except Exception as e:

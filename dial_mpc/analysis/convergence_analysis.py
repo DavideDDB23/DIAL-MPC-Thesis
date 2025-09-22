@@ -6,18 +6,16 @@ from matplotlib.lines import Line2D
 import scienceplots
 from matplotlib.patches import Rectangle
 
-# Configure matplotlib to avoid font issues
 plt.style.use(['science', 'no-latex'])
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 
-# Colorblind-friendly colors (Wong palette)
 colors = {
     'DIAL-MPC': '#E69F00',      # Orange
     'VIGAS': '#0173B2'          # Blue
 }
 
-# Sample counts used by each algorithm (from the thesis data)
+# Sample counts used by each algorithm
 SAMPLE_COUNTS = {
     'Go2 Trot': {'DIAL-MPC': 2048, 'VIGAS': 512},
     'H1 Locomotion': {'DIAL-MPC': 2048, 'VIGAS': 512},
@@ -55,9 +53,6 @@ def _label_for_algo(meta_algo: str) -> str:
 
 
 def load_convergence_runs(npz_paths: list[str]):
-    """Load runs and group by task and algorithm.
-    Returns: dict[task_name][algo] -> list of dict(mean_trace, iters, traces)
-    """
     datasets: dict[str, dict[str, list[dict]] ] = {}
     for path in npz_paths:
         try:
@@ -88,9 +83,6 @@ def load_convergence_runs(npz_paths: list[str]):
 
 
 def average_traces(runs: list[dict]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Average mean_trace across runs using NaN-padding.
-    Returns (iters, avg, std).
-    """
     if len(runs) == 0:
         return np.array([]), np.array([]), np.array([])
     max_len = max(len(r['mean_trace']) for r in runs)
@@ -106,7 +98,6 @@ def average_traces(runs: list[dict]) -> tuple[np.ndarray, np.ndarray, np.ndarray
 
 
 def calculate_convergence_metrics(iters, trace):
-    """Calculate convergence rate metrics."""
     if len(trace) < 2:
         return None
     
@@ -155,7 +146,6 @@ def plot_convergence(datasets, out_png: str, out_pdf: str):
     for task in tasks_order:
         ax = panel_axes[task]
         
-        # Enhanced title with sample counts
         title_text = task
         if task in SAMPLE_COUNTS:
             vigas_samples = SAMPLE_COUNTS[task].get('VIGAS', 'N/A')
@@ -182,15 +172,13 @@ def plot_convergence(datasets, out_png: str, out_pdf: str):
             ymins.append(np.nanmin(avg))
             ymaxs.append(np.nanmax(avg))
             
-                         # Calculate and display convergence metrics
+            # Calculate and display convergence metrics
             metrics = calculate_convergence_metrics(iters, avg)
             if metrics:
-                 # Add text box with convergence metrics
                  text = f"{algo}:\n90%: {metrics['iter_to_90']:.0f} iters"
                  if algo == 'VIGAS':
                      text += f"\nΔR: {metrics['total_improvement']:.3f}"
                  
-                 # Position text box - adjusted for better visibility
                  if algo == 'VIGAS':
                      x_pos, y_pos = 0.98, 0.85  # Top-right
                      ha, va = 'right', 'top'
@@ -249,7 +237,7 @@ def plot_convergence(datasets, out_png: str, out_pdf: str):
                    label=algo, alpha=0.9, zorder=3)
         ax_avg.fill_between(iters, avg - std, avg + std, color=colors[algo], alpha=0.2, zorder=2)
         
-                 # Add overall convergence metrics
+        # Add overall convergence metrics
         metrics = calculate_convergence_metrics(iters, avg)
         if metrics:
              text = f"{algo} (Avg):\n90%: {metrics['iter_to_90']:.1f} iters\nRate: {metrics['convergence_rate']:.4f}/iter"
@@ -271,7 +259,6 @@ def plot_convergence(datasets, out_png: str, out_pdf: str):
     ax_avg.grid(True, alpha=0.3, zorder=0)
     ax_avg.set_axisbelow(True)
 
-    # Enhanced legend with sample efficiency context
     legend_elements = [
         Line2D([0], [0], color=colors['DIAL-MPC'], lw=2, label='DIAL-MPC (Fixed Annealing, N = 2048)'),
         Line2D([0], [0], color=colors['VIGAS'], lw=2.5, label='VIGAS (Adaptive Exploration, N=512 for Trot/Loco, N=896 for Jog)')
@@ -280,11 +267,9 @@ def plot_convergence(datasets, out_png: str, out_pdf: str):
                fontsize=10, framealpha=0.95, frameon=True, borderaxespad=0.0,
                labelspacing=0.6, handlelength=2.2, handletextpad=0.7)
 
-    # Adjust layout
     plt.tight_layout()
     plt.subplots_adjust(top=0.92, left=0.26, hspace=0.35, wspace=0.3)
 
-    # Save
     os.makedirs(os.path.dirname(out_png), exist_ok=True)
     plt.savefig(out_png, dpi=300, bbox_inches='tight')
     plt.savefig(out_pdf, bbox_inches='tight')

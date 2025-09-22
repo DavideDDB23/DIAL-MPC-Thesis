@@ -4,7 +4,6 @@ import numpy as np
 from matplotlib.patches import Rectangle
 import matplotlib.patches as patches
 
-# Set up the figure and styling
 plt.style.use('default')
 fig, ax = plt.subplots(1, 1, figsize=(10, 6))
 fig.patch.set_facecolor('white')
@@ -21,11 +20,9 @@ time_points = np.arange(total_time_steps)
 # Generate a reference trajectory (sinusoidal for visual appeal)
 reference_trajectory = 2 + 0.8 * np.sin(0.3 * time_points) + 0.3 * np.sin(0.7 * time_points)
 
-# Storage for executed trajectory
 executed_trajectory = []
 executed_time_points = []
 
-# Colors (professional, minimal palette)
 horizon_color = '#E8F4FD'  # Light blue
 horizon_edge_color = '#2E86AB'  # Darker blue
 predicted_color = '#F28482'  # Coral red
@@ -43,18 +40,15 @@ def animate(frame):
         executed_trajectory = []
         executed_time_points = []
     
-    # Set up the plot
     ax.set_xlim(-1, 20)
     ax.set_ylim(-0.6, 4.2)
     ax.set_xlabel('Time Steps', fontsize=12, fontweight='bold')
     ax.set_ylabel('Control/State Value', fontsize=12, fontweight='bold')
 
     
-    # Draw reference trajectory (faint)
     ax.plot(time_points[:20], reference_trajectory[:20], '--', 
             color=reference_color, alpha=0.8, linewidth=2, label='Reference')
     
-    # Current step in the animation
     current_step = frame % max_animation_steps
     
     # Define prediction horizon window
@@ -120,18 +114,14 @@ def animate(frame):
            fontsize=10, fontweight='bold', 
            bbox=dict(boxstyle="round,pad=0.2", facecolor='yellow', alpha=0.7))
     
-    # Legend
     ax.legend(loc='upper left', frameon=True, fancybox=True, shadow=True, fontsize=10)
     
-    # Grid for better readability
     ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     ax.set_axisbelow(True)
 
-# Create animation
 anim = animation.FuncAnimation(fig, animate, frames=max_animation_steps, 
                              interval=800, repeat=True, blit=False)
 
-# Adjust layout with more padding
 plt.tight_layout(pad=2.0)
 plt.subplots_adjust(bottom=0.15, top=0.90, left=0.10, right=0.95)
 
@@ -140,12 +130,4 @@ print("Creating MPC animation...")
 anim.save('mpc_receding_horizon_animation.gif', writer='pillow', fps=1.25, dpi=150)
 print("Animation saved as 'mpc_receding_horizon_animation.gif'")
 
-# Also save as MP4 if ffmpeg is available
-try:
-    anim.save('mpc_receding_horizon_animation.mp4', writer='ffmpeg', fps=1.25, dpi=150)
-    print("Animation also saved as 'mpc_receding_horizon_animation.mp4'")
-except:
-    print("MP4 export failed - ffmpeg not available. GIF created successfully.")
-
-# Show the plot
 plt.show() 

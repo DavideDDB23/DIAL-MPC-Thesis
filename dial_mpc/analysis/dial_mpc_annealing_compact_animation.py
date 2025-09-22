@@ -4,7 +4,6 @@ import matplotlib.animation as animation
 from matplotlib.patches import Rectangle
 import matplotlib.patches as mpatches
 
-# Set up the plot style for clean, professional look matching thesis plots
 plt.rcParams.update({
     'font.family': 'DejaVu Sans',
     'font.size': 12,
@@ -15,13 +14,12 @@ plt.rcParams.update({
     'figure.facecolor': 'white'
 })
 
-# DIAL-MPC parameters (from the thesis and code)
+# DIAL-MPC parameters
 N_diffuse = 8      # Number of diffusion iterations
 H_nodes = 10       # Prediction horizon (control nodes)
 alpha_traj = 0.7   # Trajectory annealing factor
 alpha_horizon = 0.8 # Action-level annealing factor
 
-# Consistent colorblind-friendly colors matching thesis plots
 colors = {
     'dial': '#ff7f0e',          # Orange (DIAL-MPC)
     'vigas': '#1f77b4',         # Blue (VIGAS/nominal)
@@ -50,7 +48,7 @@ def generate_sample_trajectories(iteration, combined_schedule, n_samples=15):
     return trajectories, nominal
 
 def create_compact_animation():
-    """Create a compact, intuitive DIAL-MPC annealing animation."""
+    """DIAL-MPC annealing animation."""
     fig, (ax_heatmap, ax_samples) = plt.subplots(
         2, 1, figsize=(10, 8.5), 
         gridspec_kw={'height_ratios': [1.2, 1.8]},
@@ -60,7 +58,7 @@ def create_compact_animation():
     
     combined_schedule = compute_annealing_schedule()
     
-    # --- Top Plot: Annealing Schedule with Clear Labels ---
+    # --- Top Plot: Annealing Schedule with Labels ---
     im = ax_heatmap.imshow(combined_schedule, aspect='auto', origin='lower',
                            cmap='Oranges', vmin=0, vmax=combined_schedule.max())
     ax_heatmap.set_ylabel('Diffusion Iteration', fontsize=12, fontweight='bold')
@@ -74,7 +72,6 @@ def create_compact_animation():
     cbar = plt.colorbar(im, ax=ax_heatmap, fraction=0.046, pad=0.04)
     cbar.set_label('Noise Scale', rotation=270, labelpad=15, fontweight='bold')
     
-    # Correctly position vertical annotations to avoid overlap and align with variance levels
     ax_heatmap.text(-1.8, N_diffuse - 2.5, 'Low Var.\n(Refine)', 
                     rotation=90, ha='center', va='center', fontweight='bold',
                     color=colors['low_noise'], fontsize=10)
@@ -190,11 +187,9 @@ def create_compact_animation():
                                    interval=1400, repeat=True, blit=False)
     
     try:
-        print("Saving improved DIAL-MPC animation...")
+        print("Saving DIAL-MPC animation...")
         anim.save('dial_mpc_annealing_clear.gif', writer='pillow', fps=0.7, dpi=120)
-        anim.save('dial_mpc_annealing_clear.mp4', writer='ffmpeg', fps=0.7, dpi=120,
-                  extra_args=['-vcodec', 'libx264'])
-        print("Files saved: dial_mpc_annealing_clear.gif, dial_mpc_annealing_clear.mp4")
+        print("Files saved: dial_mpc_annealing_clear.gif")
     except Exception as e:
         print(f"Error saving animation: {e}")
 

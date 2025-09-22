@@ -2,7 +2,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
-# Set up the plot style matching thesis plots
 plt.rcParams.update({
     'font.family': 'DejaVu Sans',
     'font.size': 12,
@@ -13,7 +12,6 @@ plt.rcParams.update({
     'figure.facecolor': 'white'
 })
 
-# Consistent colorblind-friendly colors matching thesis plots
 colors = {
     'dial': '#ff7f0e',          # Orange (DIAL-MPC)
     'vigas': '#1f77b4',         # Blue (VIGAS/nominal)
@@ -71,7 +69,6 @@ def create_exploration_comparison():
                            linewidth=3, alpha=0.8)
         ax_fixed.add_patch(circle)
         
-        # Add text annotation
         if i == 1:  # Middle point
             ax_fixed.annotate('Constant\nExploration', 
                              xy=(time_steps[point], nominal_traj[point] + 1.8),
@@ -178,10 +175,8 @@ def create_exploration_comparison():
     plt.tight_layout()
     plt.subplots_adjust(top=0.88, bottom=0.2)
     
-    # Save the figure
     plt.savefig('fixed_vs_adaptive_exploration.png', dpi=300, bbox_inches='tight')
-    plt.savefig('fixed_vs_adaptive_exploration.pdf', bbox_inches='tight')
-    print("Saved: fixed_vs_adaptive_exploration.png and .pdf")
+    print("Saved: fixed_vs_adaptive_exploration.png")
     
     plt.show()
 

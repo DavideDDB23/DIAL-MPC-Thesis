@@ -1,10 +1,3 @@
-#!/usr/bin/env python3
-"""
-Animated visualization showing the evolution from fixed to adaptive covariance in VIGAS.
-Demonstrates how the algorithm learns the structure of the reward landscape.
-Can generate a two-panel (default) or single-panel (--single-panel) version.
-"""
-
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -12,7 +5,6 @@ from matplotlib.patches import Ellipse
 import scienceplots
 import argparse
 
-# Set up the plot style for consistency
 plt.rcParams.update({
     'font.family': 'DejaVu Sans',
     'font.size': 14,
@@ -23,13 +15,12 @@ plt.rcParams.update({
     'figure.facecolor': 'white'
 })
 
-# Colorblind-friendly Wong palette
 COLORS = {
     'orange': '#E69F00',
     'sky_blue': '#56B4E9',
     'green': '#009E73',
     'yellow': '#F0E442',
-    'blue': '#0173B2', # Using a brilliant blue for VIGAS for high contrast
+    'blue': '#0173B2',
     'red': '#CC79A7',
     'black': '#000000',
     'gray': '#808080'
@@ -37,10 +28,9 @@ COLORS = {
 
 def create_reward_landscape(x, y):
     """Create a synthetic reward landscape with correlation structure."""
-    # Create a landscape with preferred direction (correlation)
     r1 = -0.5 * ((x - 1)**2 + (y - 0.5)**2)  # Peak 1
     r2 = -0.3 * ((x + 1)**2 + (y + 0.5)**2)  # Peak 2
-    r3 = -0.8 * ((x - 0.5)**2 + 2*(y + 1)**2)  # Valley (elongated)
+    r3 = -0.8 * ((x - 0.5)**2 + 2*(y + 1)**2)  # Valley
     ridge = -0.1 * (x - 2*y)**2  # Ridge showing correlation
     return r1 + r2 + r3 + ridge
 
@@ -111,7 +101,6 @@ def create_covariance_evolution_animation(single_panel=False):
         else:  # Phase 3: Paused at adaptive
             progress = 1.0
 
-        # Set titles and colors based on progress
         if progress == 0.0:
             title1 = "Fixed Covariance (MPPI/DIAL-MPC)"
             title2 = "Isotropic Distribution" if not single_panel else ""
@@ -119,11 +108,11 @@ def create_covariance_evolution_animation(single_panel=False):
         elif progress < 1.0:
             title1 = "Adaptive Covariance (VIGAS)"
             title2 = f"Learning... {int(progress*100)}%" if not single_panel else ""
-            color = COLORS['orange'] # Use orange for the transition phase
+            color = COLORS['orange']
         else: # progress == 1.0
             title1 = "Adaptive Covariance (VIGAS)"
             title2 = "Learning... 100%" if not single_panel else ""
-            color = COLORS['blue'] # Use brilliant blue for the final state
+            color = COLORS['blue']
 
         # Interpolate between fixed and adaptive
         current_cov = (1 - progress) * cov_fixed + progress * cov_adaptive
@@ -154,7 +143,7 @@ def create_covariance_evolution_animation(single_panel=False):
         ax1.spines['top'].set_visible(False)
         ax1.spines['right'].set_visible(False)
         
-        # Right plot: Covariance matrix visualization (if not single panel)
+        # Right plot: Covariance matrix visualization
         if not single_panel:
             ax2.imshow(current_cov, cmap='RdYlBu_r', aspect='equal', vmin=-0.5, vmax=2.5)
             

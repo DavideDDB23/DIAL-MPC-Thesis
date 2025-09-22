@@ -3,14 +3,11 @@ import numpy as np
 import scienceplots
 from matplotlib.lines import Line2D
 
-# Use science plots style for publication quality
 plt.style.use(['science', 'no-latex'])
 
-# Configure font to avoid missing glyphs with scienceplots and no-latex
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 
-# Data from the results tables
 data = {
     'Go2 Trot': [
         ('MPPI', -0.201, 2048),
@@ -38,7 +35,6 @@ data = {
     ],
 }
 
-# Control variation data for each task (lower is better)
 control_variation = {
     'Go2 Trot': {
         'MPPI': 236, 'DIAL-MPC': 168, 'DIAL-MPC + Low-Pass': 151,
@@ -54,7 +50,6 @@ control_variation = {
     }
 }
 
-# Colorblind-friendly colors (Wong palette)
 colors = {
     'VIGAS': '#0173B2',          # Blue
     'DIAL-MPC': '#E69F00',       # Orange  
@@ -71,7 +66,6 @@ axis_ranges = {
     'H1 Jog': dict(xlim=(120, 850), ylim=(-0.35, -0.08), smooth=(125, 160), smooth_text=(142, -0.33)),
 }
 
-# Unified legend handles
 base_samples = 2048
 legend_elements = [
     Line2D([0], [0], marker='o', color='w', label=f'MPPI (N={base_samples})', markerfacecolor=colors['MPPI'], markersize=12),
@@ -100,14 +94,12 @@ def plot_task(ax, task_name):
         ax.scatter(cv, reward, c=colors[algorithm], s=110, alpha=0.9,
                    edgecolors='white', linewidth=1.2, label=algorithm, zorder=5)
 
-    # Apply ranges and highlight smooth region
     rng = axis_ranges[task_name]
     ax.set_xlim(*rng['xlim']); ax.set_ylim(*rng['ylim'])
     ax.axvspan(rng['smooth'][0], rng['smooth'][1], alpha=0.18, color='lightgreen', zorder=1)
     ax.text(rng['smooth_text'][0], rng['smooth_text'][1], 'Smooth Control\nRegion',
             fontsize=8, ha='center', va='center', bbox=dict(boxstyle='round,pad=0.2', facecolor='lightgreen', alpha=0.8))
 
-    # Labels (no global title; keep subplot titles)
     ax.set_xlabel('Control Variation (Lower is Better)', fontsize=9)
     ax.set_ylabel('Mean Reward (Higher is Better)', fontsize=9)
     ax.tick_params(labelsize=8)
@@ -127,6 +119,5 @@ legend_ax.legend(handles=legend_elements, loc='center', frameon=True, fontsize=9
 legend_ax.axis('off')
 
 plt.subplots_adjust(left=0.08, right=0.985, top=0.94, bottom=0.09)
-plt.savefig('control_variation_overview.pdf', dpi=300, bbox_inches='tight')
 plt.savefig('control_variation_overview.png', dpi=300, bbox_inches='tight')
 plt.show() 

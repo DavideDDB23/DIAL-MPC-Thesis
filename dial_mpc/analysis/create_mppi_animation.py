@@ -4,7 +4,6 @@ import numpy as np
 from matplotlib.patches import Rectangle
 import matplotlib.patches as patches
 
-# Set up the figure and styling
 plt.style.use('default')
 fig, ax = plt.subplots(1, 1, figsize=(10, 6))
 fig.patch.set_facecolor('white')
@@ -19,15 +18,13 @@ num_samples = 20  # Number of sampled trajectories
 # Time axis
 time_points = np.arange(total_time_steps)
 
-# Generate a reference trajectory (more complex for MPPI demo)
+# Generate a reference trajectory
 reference_trajectory = 2 + 0.8 * np.sin(0.3 * time_points) + 0.4 * np.cos(0.5 * time_points + 0.5)
 
-# Storage for executed trajectory and nominal trajectory
 executed_trajectory = []
 executed_time_points = []
 nominal_trajectory = reference_trajectory.copy()
 
-# Colors (same as MPC plots, colorblind-friendly)
 horizon_color = '#E8F4FD'  # Light blue
 horizon_edge_color = '#2E86AB'  # Darker blue
 nominal_color = '#2E86AB'  # Blue for nominal
@@ -46,13 +43,11 @@ def animate(frame):
         executed_time_points = []
         nominal_trajectory = reference_trajectory.copy()
     
-    # Set up the plot
     ax.set_xlim(-1, 20)
     ax.set_ylim(-0.6, 4.5)
     ax.set_xlabel('Time Steps', fontsize=12, fontweight='bold')
     ax.set_ylabel('Control/State Value', fontsize=12, fontweight='bold')
     
-    # Current step in the animation
     current_step = frame % max_animation_steps
     
     # Define prediction horizon window
@@ -92,11 +87,11 @@ def animate(frame):
             reward = -np.sum((sampled_traj - reference_trajectory[horizon_start:horizon_end])**2)
             sample_rewards.append(reward)
             
-            # Draw sampled trajectory (thin, semi-transparent)
+            # Draw sampled trajectory
             ax.plot(horizon_time, sampled_traj, '-', color=sampled_color, 
                    linewidth=1, alpha=0.4)
         
-        # Draw nominal trajectory (bold)
+        # Draw nominal trajectory
         ax.plot(horizon_time, nominal_segment, '-', color=nominal_color, 
                linewidth=4, alpha=0.9, label='Nominal Trajectory')
         
@@ -107,7 +102,7 @@ def animate(frame):
                    markeredgecolor='black', markeredgewidth=2,
                    label='Next Executed Point')
         
-        # Update nominal trajectory using reward-weighted average (simplified MPPI update)
+        # Update nominal trajectory using reward-weighted average
         if len(sample_trajectories) > 0:
             sample_rewards = np.array(sample_rewards)
             # Softmax weighting
@@ -152,16 +147,13 @@ def animate(frame):
         ax.text(current_step, 0.95, 'Horizon Shift', ha='center', va='center', 
                fontsize=9, fontweight='bold')
     
-    # Current time indicator
     ax.axvline(x=current_step, color='red', linestyle='-', alpha=0.7, linewidth=2)
     ax.text(current_step, -0.35, f't = {current_step}', ha='center', va='top',
            fontsize=10, fontweight='bold', 
            bbox=dict(boxstyle="round,pad=0.2", facecolor='yellow', alpha=0.7))
     
-    # Legend
     ax.legend(loc='lower right', frameon=True, fancybox=True, shadow=True, fontsize=10)
     
-    # Grid for better readability
     ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     ax.set_axisbelow(True)
 
@@ -169,7 +161,6 @@ def animate(frame):
 anim = animation.FuncAnimation(fig, animate, frames=max_animation_steps, 
                              interval=1200, repeat=True, blit=False)
 
-# Adjust layout with more padding
 plt.tight_layout(pad=2.0)
 plt.subplots_adjust(bottom=0.15, top=0.90, left=0.10, right=0.95)
 
@@ -178,12 +169,4 @@ print("Creating MPPI animation...")
 anim.save('mppi_control_animation.gif', writer='pillow', fps=0.8, dpi=150)
 print("Animation saved as 'mppi_control_animation.gif'")
 
-# Also save as MP4 if ffmpeg is available
-try:
-    anim.save('mppi_control_animation.mp4', writer='ffmpeg', fps=0.8, dpi=150)
-    print("Animation also saved as 'mppi_control_animation.mp4'")
-except:
-    print("MP4 export failed - ffmpeg not available. GIF created successfully.")
-
-# Show the plot
 plt.show() 

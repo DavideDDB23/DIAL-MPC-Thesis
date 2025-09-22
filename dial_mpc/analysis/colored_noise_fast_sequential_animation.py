@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from scipy import signal
 
-# Set up the plot style for a clean, professional look
 plt.rcParams.update({
     'font.family': 'DejaVu Sans',
     'font.size': 14,
@@ -14,7 +13,6 @@ plt.rcParams.update({
     'figure.facecolor': 'white'
 })
 
-# High-contrast, colorblind-friendly colors with literal pink and brown
 colors = {
     'white': '#606060',    # Visible Gray
     'pink': '#FF69B4',     # Hot Pink
@@ -33,13 +31,11 @@ def generate_colored_noise_from_source(white_noise_fft, beta, length, fs=100.0):
     colored = colored / (np.std(colored) + 1e-8)
     return colored
 
-def create_fast_sequential_noise_animation():
-    """Create a fast, sequential animation with distinct phases."""
-    
+def create_fast_sequential_noise_animation():    
     # Signal parameters
     fs = 100.0
     dt = 1.0 / fs
-    total_duration = 8.0 # Reduced from 30.0 to make scrolling slower
+    total_duration = 8.0
     
     t_total = np.arange(0, total_duration, dt)
     
@@ -51,7 +47,6 @@ def create_fast_sequential_noise_animation():
     # Create figure
     fig, ax = plt.subplots(figsize=(14, 8))
     
-    # --- Plot Setup ---
     ax.set_ylim(-3.5, 3.5)
     ax.set_xlabel('Time (s)', fontweight='bold', fontsize=14)
     ax.set_ylabel('Noise Amplitude', fontweight='bold', fontsize=14)
@@ -103,7 +98,7 @@ def create_fast_sequential_noise_animation():
             end_color = np.array(plt.cm.colors.to_rgb(colors['brown']))
             current_color = start_color * (1 - progress) + end_color * progress
             title_text = f'Morphing to Brown... (β = {beta:.2f})'
-        else: # Stay on Brown (including pause)
+        else: # Stay on Brown
             beta = 2.0
             current_color = colors['brown']
             title_text = f'Brown Noise (β = {beta:.1f})'
@@ -145,9 +140,7 @@ def create_fast_sequential_noise_animation():
     try:
         print("Saving fast sequential colored noise animation...")
         anim.save('colored_noise_fast_sequential.gif', writer='pillow', fps=fps, dpi=120)
-        anim.save('colored_noise_fast_sequential.mp4', writer='ffmpeg', fps=fps, dpi=120,
-                  extra_args=['-vcodec', 'libx264'])
-        print("Files saved: colored_noise_fast_sequential.gif, colored_noise_fast_sequential.mp4")
+        print("Files saved: colored_noise_fast_sequential.gif")
     except Exception as e:
         print(f"Error saving animation: {e}")
 

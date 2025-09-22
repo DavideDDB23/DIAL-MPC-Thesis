@@ -5,18 +5,15 @@ import numpy as np
 from matplotlib.lines import Line2D
 import scienceplots
 
-# Configure matplotlib to avoid font issues
 plt.style.use(['science', 'no-latex'])
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 
-# Colorblind-friendly colors (Wong palette)
 COLORS = {
     'DIAL-MPC': '#E69F00',      # Orange
     'VIGAS': '#0173B2'          # Blue
 }
 
-# Task name mappings
 TASK_NAME_MAPPING = {
     'unitree_go2_walk': 'Go2 Trot',
     'unitree_h1_walk': 'H1 Locomotion',
@@ -203,7 +200,6 @@ def plot_sample_efficiency(datasets, tasks, out_png: str, out_pdf: str):
     ]
     legend_ax.legend(handles=legend_elements, loc='center', fontsize=10, framealpha=0.95, frameon=True)
 
-    # No figure suptitle per request; just tighten layout
     plt.tight_layout()
     plt.subplots_adjust(top=0.95, left=0.08, right=0.98, bottom=0.08, hspace=0.35, wspace=0.25)
 

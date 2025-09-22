@@ -1,18 +1,10 @@
-#!/usr/bin/env python3
-"""
-Animated plot illustrating the effect of band-limited noise filter in DIAL-MPC.
-Shows the filtering process in real-time for immediate understanding.
-"""
-
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import scienceplots
 
-# Set style for clean, presentation-ready plots
 plt.style.use(['science', 'no-latex'])
 
-# Set up the plot style for a clean, professional look
 plt.rcParams.update({
     'font.family': 'DejaVu Sans',
     'font.size': 14,
@@ -23,7 +15,6 @@ plt.rcParams.update({
     'figure.facecolor': 'white'
 })
 
-# Colorblind-friendly Wong palette
 COLORS = {
     'orange': '#E69F00',
     'sky_blue': '#56B4E9',
@@ -57,8 +48,6 @@ def generate_bandlimited_noise(fmax, dt, T, num_harmonics=8, seed=42):
     return signal_sum
 
 def create_bandlimited_animation():
-    """Create a fast, animated plot showing the band-limited filtering effect."""
-    
     # Parameters
     fmax = 2.0  # Hz
     num_harmonics = 8
@@ -119,7 +108,6 @@ def create_bandlimited_animation():
                            bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
             ax.set_title('Step 3: Band-Limited Result', color=COLORS['green'], weight='bold', fontsize=18, pad=15)
         
-        # Common formatting
         ax.set_xlabel('Time (s)', fontsize=12, weight='bold')
         ax.set_ylabel('Noise Amplitude', fontsize=12, weight='bold')
         ax.legend(loc='upper right', fontsize=11, framealpha=0.9)
@@ -127,7 +115,6 @@ def create_bandlimited_animation():
         ax.set_xlim(0, duration)
         ax.set_ylim(-3.5, 3.5)
         
-        # Completely remove top and right spines and their ticks
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         ax.tick_params(top=False, right=False)
@@ -138,9 +125,8 @@ def create_bandlimited_animation():
     anim = animation.FuncAnimation(fig, animate, frames=total_frames, 
                                   interval=100, repeat=True, blit=False)
     
-    # Adjust layout to ensure title fits within image bounds
     plt.tight_layout(pad=2.0)
-    plt.subplots_adjust(top=0.85)  # Leave more room for the title
+    plt.subplots_adjust(top=0.85) 
     
     # Save as GIF
     print("Generating fast band-limited noise filter animation...")

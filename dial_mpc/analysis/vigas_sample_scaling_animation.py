@@ -1,16 +1,8 @@
-#!/usr/bin/env python3
-"""
-Animated visualization of VIGAS Sample Budget Scalability Analysis.
-Shows non-monotonic sample-performance relationship across tasks.
-Demonstrates task-specific optimal budgets and challenges "more is better" assumption.
-"""
-
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import scienceplots
 
-# Set up the plot style for consistency
 plt.rcParams.update({
     'font.family': 'DejaVu Sans',
     'font.size': 12,
@@ -21,7 +13,6 @@ plt.rcParams.update({
     'figure.facecolor': 'white'
 })
 
-# Colorblind-friendly Wong palette
 COLORS = {
     'orange': '#E69F00',
     'sky_blue': '#56B4E9',
@@ -36,45 +27,41 @@ COLORS = {
 def create_sample_scaling_animation():
     """Create animation showing VIGAS sample budget scalability."""
     
-    # Data from the table
     tasks = ['Go2 Trot', 'Go2 SeqJump', 'H1 Jog', 'H1 Loco']
     sample_counts = [512, 896, 1024]
     
-    # Performance data (higher is better for all metrics after normalization)
     data = {
         'Go2 Trot': {
-            'rewards': [-0.0213, -0.0196, -0.0199],  # Higher magnitude is better (less negative)
-            'runtimes': [81, 128, 147],  # seconds
-            'tracking_errors': [0.058, 0.060, 0.057],  # Lower is better
-            'optimal_idx': 1,  # 896 samples for best reward
+            'rewards': [-0.0213, -0.0196, -0.0199],  
+            'runtimes': [81, 128, 147],
+            'tracking_errors': [0.058, 0.060, 0.057],  
+            'optimal_idx': 1, 
             'color': COLORS['blue']
         },
         'Go2 SeqJump': {
-            'rewards': [10.379, 10.382, 10.379],  # Higher is better
-            'runtimes': [105, 158, 173],  # seconds
-            'contact_rewards': [0.675, 0.700, 0.700],  # Higher is better
-            'optimal_idx': 1,  # 896 samples for best contact reward
+            'rewards': [10.379, 10.382, 10.379], 
+            'runtimes': [105, 158, 173], 
+            'contact_rewards': [0.675, 0.700, 0.700], 
+            'optimal_idx': 1, 
             'color': COLORS['green']
         },
         'H1 Jog': {
-            'rewards': [-0.0940, -0.0924, -0.0928],  # Higher magnitude is better
-            'runtimes': [346, 619, 659],  # seconds
-            'optimal_idx': 1,  # 896 samples for best reward
+            'rewards': [-0.0940, -0.0924, -0.0928], 
+            'runtimes': [346, 619, 659], 
+            'optimal_idx': 1, 
             'color': COLORS['orange']
         },
         'H1 Loco': {
-            'rewards': [-0.0598, -0.0575, -0.0576],  # Higher magnitude is better
-            'runtimes': [47, 72, 78],  # seconds
-            'optimal_idx': 1,  # 896 samples for best reward
+            'rewards': [-0.0598, -0.0575, -0.0576], 
+            'runtimes': [47, 72, 78],  
+            'optimal_idx': 1,  
             'color': COLORS['red']
         }
     }
     
-    # Create figure with subplots
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(14, 10))
     axes = [ax1, ax2, ax3, ax4]
     
-    # Animation parameters for an 8-second total duration (2s active build-up + 6s pause)
     fps = 12
     active_duration = 2
     pause_duration = 6
@@ -83,15 +70,12 @@ def create_sample_scaling_animation():
     total_frames = active_frames + pause_frames
 
     def animate(frame):
-        # Clear all axes
         for ax in axes:
             ax.clear()
         
-        # Determine effective frame, capping at last active frame for the pause
         effective_frame = min(frame, active_frames - 1)
         progress = effective_frame / (active_frames - 1) if active_frames > 1 else 1.0
         
-        # Plot each task simultaneously
         for i, (task_name, task_data) in enumerate(data.items()):
             ax = axes[i]
             
@@ -129,7 +113,6 @@ def create_sample_scaling_animation():
                                bbox=dict(boxstyle='round,pad=0.2', 
                                        facecolor='white', alpha=0.7))
             
-            # Formatting
             ax.set_xlim(400, 1100)
             if 'Go2' in task_name:
                 if 'Trot' in task_name:
@@ -150,11 +133,9 @@ def create_sample_scaling_animation():
             ax.spines['top'].set_visible(False)
             ax.spines['right'].set_visible(False)
             
-            # Add legend if optimal point is shown
             if points_to_show > task_data['optimal_idx']:
                 ax.legend(loc='upper right', fontsize=10)
         
-        # Overall title based on phase
         if progress < 1.0:
             title = "Task-by-Task Performance vs Sample Count"
             title_color = COLORS['blue']

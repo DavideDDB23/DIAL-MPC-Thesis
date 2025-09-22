@@ -1,16 +1,8 @@
-#!/usr/bin/env python3
-"""
-Animated visualization of Low-Rank Plus Diagonal Covariance sampling in VIGAS.
-Shows how a single sample is constructed: x = μ + L·ε_k + √d·ε_d
-Focuses on the mathematical decomposition for first-glance understanding.
-"""
-
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import scienceplots
 
-# Set up the plot style for consistency
 plt.rcParams.update({
     'font.family': 'DejaVu Sans',
     'font.size': 14,
@@ -21,7 +13,6 @@ plt.rcParams.update({
     'figure.facecolor': 'white'
 })
 
-# Colorblind-friendly Wong palette
 COLORS = {
     'orange': '#E69F00',
     'sky_blue': '#56B4E9',
@@ -36,11 +27,11 @@ COLORS = {
 def sample_lowrank_diagonal(mean, L, d, n_samples=100):
     """
     Sample from low-rank plus diagonal covariance: Σ = L·L^T + diag(d)
-    Uses the correct VIGAS sampling formula: Y = μ + eps_k @ L.T + eps_d * sqrt(d)
+    Uses the VIGAS sampling formula: Y = μ + eps_k @ L.T + eps_d * sqrt(d)
     """
     D, k = L.shape
     eps_k = np.random.normal(0, 1, (n_samples, k))
-    lowrank_samples = eps_k @ L.T  # FIXED: Correct matrix multiplication order
+    lowrank_samples = eps_k @ L.T
     eps_d = np.random.normal(0, 1, (n_samples, D))
     diagonal_samples = eps_d * np.sqrt(d)[None, :]
     return mean[None, :] + lowrank_samples + diagonal_samples
@@ -131,7 +122,6 @@ def create_lowrank_diagonal_animation():
             ax.scatter(all_samples[:, 0], all_samples[:, 1], c=COLORS['blue'], 
                       alpha=0.12, s=15, zorder=0)
 
-        # Formatting
         ax.set_xlim(-3.5, 3.5)
         ax.set_ylim(-3.5, 3.5)
         ax.set_xlabel('Control Dimension 1', fontweight='bold')
@@ -139,11 +129,9 @@ def create_lowrank_diagonal_animation():
         ax.grid(True, alpha=0.3)
         ax.legend(loc='upper right', framealpha=0.9, fontsize=12)
         
-        # Remove top and right spines
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         
-        # Overall title
         fig.suptitle(phase, fontsize=20, fontweight='bold', color=phase_color)
     
     # Create animation

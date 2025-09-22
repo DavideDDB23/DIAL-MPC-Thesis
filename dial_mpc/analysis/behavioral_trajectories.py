@@ -5,14 +5,12 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import scienceplots
 
-# Configure matplotlib to avoid font issues
 plt.style.use(['science', 'no-latex'])
 plt.rcParams['font.family'] = 'sans-serif'
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans']
 
-# Colorblind-friendly colors (Wong palette)
 COLORS = {
-    'Target': '#000000',       # Black for target
+    'Target': '#000000',       # Black
     'MPPI': '#56B4E9',         # Sky blue
     'DIAL-MPC': '#E69F00',     # Orange
     'VIGAS': '#0173B2'         # Blue
@@ -75,7 +73,7 @@ def load_datasets(npz_paths: list[str], expected_env: str):
             'controls': data['controls'] if 'controls' in data.files else None,
             'path': path,
         }
-        # Convert object-typed None back to None if present
+
         if isinstance(ds['feet_z'], np.ndarray) and ds['feet_z'].dtype == object:
             ds['feet_z'] = None
         if isinstance(ds['feet_z_tar'], np.ndarray) and ds['feet_z_tar'].dtype == object:
@@ -105,7 +103,6 @@ def plot_behavior(datasets, out_png: str, out_pdf: str, feet_indices: list[int])
     # Larger figure with two rows: feet (2 cols), velocity (full width)
     fig = plt.figure(figsize=(16, 9))
     gs = fig.add_gridspec(2, 2, height_ratios=[1.0, 1.5], hspace=0.35, wspace=0.25)
-    # Leave room on the right for outside legends
     plt.subplots_adjust(right=0.80)
 
     # 1. Foot Height Trajectories for two selected feet
@@ -113,7 +110,7 @@ def plot_behavior(datasets, out_png: str, out_pdf: str, feet_indices: list[int])
     ax2 = fig.add_subplot(gs[0, 1])
 
     for i, (idx, ax) in enumerate(zip(feet_indices, [ax1, ax2])):
-        # Plot target if available (from any dataset that has it)
+        # Plot target if available
         for ds in datasets:
             if ds['feet_z_tar'] is not None:
                 ax.plot(ds['time'], ds['feet_z_tar'][:, idx], color=COLORS['Target'], linewidth=2.4,
@@ -145,7 +142,7 @@ def plot_behavior(datasets, out_png: str, out_pdf: str, feet_indices: list[int])
 
     # 2. Body Velocity Tracking (forward vx in body frame)
     ax3 = fig.add_subplot(gs[1, :])
-    # Plot target from any dataset that has it
+    # Plot target
     for ds in datasets:
         if ds['vel_tar'] is not None:
             ax3.plot(ds['time'], ds['vel_tar'][:, 0], color=COLORS['Target'], linewidth=2.6,
@@ -167,7 +164,6 @@ def plot_behavior(datasets, out_png: str, out_pdf: str, feet_indices: list[int])
     ax3.legend(loc='upper left', bbox_to_anchor=(1.01, 1.0), fontsize=11,
                labelspacing=0.3, framealpha=0.95, frameon=True, ncol=1)
 
-    # Save first, then show
     os.makedirs(os.path.dirname(out_png), exist_ok=True)
     plt.savefig(out_png, dpi=300, bbox_inches='tight')
     plt.savefig(out_pdf, bbox_inches='tight')
