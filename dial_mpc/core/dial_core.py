@@ -54,7 +54,6 @@ def softmax_update(weights, Y0s, sigma, mu_0t):
     return mu_0tm1, sigma
 
 # JAX Butterworth biquad utilities (2nd-order)
-
 def _butterworth_biquad_coeffs(fs: float, fc: float):
     ff = fc / fs
     ita = 1.0 / jnp.tan(jnp.pi * ff)
@@ -148,7 +147,7 @@ def second_order_butterworth(
 
 def jax_colored_noise(key, beta: float, shape: tuple, axis: int = -1) -> jax.Array:
     """
-    Generate colored noise with power spectrum ~ 1/f^beta using JAX.
+    Generate colored noise with power spectrum ~ 1/f^beta.
     Ensures zero DC (mean) and unit variance along the specified axis.
     """
     T = shape[axis]
@@ -182,7 +181,7 @@ def jax_colored_noise(key, beta: float, shape: tuple, axis: int = -1) -> jax.Arr
 def jax_bandlimited_noise(key, fmax: float, dt: float, shape: tuple, axis: int = 1, num_harmonics: int = 8) -> jax.Array:
     """
     Generate band-limited noise by summing a small number of random Fourier modes up to fmax.
-    Expected shape is (batch, T, D) with time at axis=1 by default.
+    Shape is (batch, T, D) with time at axis=1.
     """
     assert axis == 1, "jax_bandlimited_noise expects time axis at position 1"
     batch, T, D = shape
@@ -992,7 +991,7 @@ def main():
     jnp.save(os.path.join(dial_config.output_dir, f"{timestamp}_states"), data)
     jnp.save(os.path.join(dial_config.output_dir, f"{timestamp}_predictions"), xdata)
 
-    # Save consolidated rollout metrics for analysis (e.g., behavioral trajectories)
+    # Save consolidated rollout metrics for analysis
     try:
         T_total = len(rollout)
         time_arr = jnp.arange(T_total) * float(env.dt)
